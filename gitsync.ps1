@@ -464,6 +464,27 @@ function gitsync {
     else {
         $targetBranches = @($managedBranches)
     }
+    # Unmerged-descendant ("sub-branch") guard (#10): mirror gitmerge's engine skip so gitsync never
+    # pushes — nor reports as "synced" — a target the merge engine deliberately skips (its descendant's
+    # work was never consolidated into main). gitmerge still emits the detailed warning during the merge.
+    if (@($targetBranches).Count -gt 0) {
+        $targetSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        foreach ($t in $targetBranches) { [void]$targetSet.Add($t) }
+        $keptTargets = [System.Collections.Generic.List[string]]::new()
+        foreach ($target in $targetBranches) {
+            $descendants = @($managedBranches | Where-Object {
+                    $_ -cne $target -and $_ -cne $mainBranch -and -not $targetSet.Contains($_) -and
+                    (Test-Ancestor -Repository $repository -Ancestor "refs/heads/$target" -Descendant "refs/heads/$_")
+                })
+            if ($descendants.Count -gt 0) {
+                Write-StatusLine -Marker '✗' -Message "Skipping '$target': unmerged descendant branch(es): $($descendants -join ', '). It will not be consolidated or pushed; merge them back into '$target' (or select them too / use 'all') to include its work." -Color Yellow
+            }
+            else {
+                $keptTargets.Add($target)
+            }
+        }
+        $targetBranches = @($keptTargets.ToArray())
+    }
     $pushBranches = Get-UniqueBranchList (@($mainBranch) + @($targetBranches))
     $skipLocalMerge = (($mode -eq 'single' -and $BranchName -ceq $mainBranch) -or ($mode -eq 'current' -and @($targetBranches).Count -eq 0))
 
