@@ -663,6 +663,7 @@ function gitmerge {
         IntegratedBranches    = [System.Collections.Generic.List[string]]::new()
         SynchronizedBranches  = [System.Collections.Generic.List[string]]::new()
         FailedBranches        = [System.Collections.Generic.List[string]]::new()
+        SkippedBranches       = [System.Collections.Generic.List[string]]::new()
         ConflictBranch        = ''
         MainPublished         = 'NO'
         CleanupStatus         = 'NOT REQUIRED'
@@ -766,12 +767,39 @@ function gitmerge {
             $targetBranches = @($managedBranches)
         }
 
+        # Unmerged-descendant ("sub-branch") guard (#10): skip a selected target that has a descendant
+        # branch (not itself selected) carrying unmerged commits, and warn. gitmerge never loses that
+        # work; this just avoids silently consolidating a branch whose children would be left behind.
+        if (@($targetBranches).Count -gt 0) {
+            $targetSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+            foreach ($t in $targetBranches) { [void]$targetSet.Add($t) }
+            $keptTargets = [System.Collections.Generic.List[string]]::new()
+            foreach ($target in $targetBranches) {
+                $descendants = @($managedBranches | Where-Object {
+                        $_ -cne $target -and $_ -cne $mainBranch -and -not $targetSet.Contains($_) -and
+                        (Test-Ancestor -Repository $repository -Ancestor "refs/heads/$target" -Descendant "refs/heads/$_")
+                    })
+                if ($descendants.Count -gt 0) {
+                    $runState.SkippedBranches.Add($target)
+                    Write-StatusLine -Marker '✗' -Message "Skipping '$target': unmerged descendant branch(es): $($descendants -join ', '). Merge them back into '$target' (or select them too / use 'all') to include its work." -Color Yellow
+                }
+                else {
+                    $keptTargets.Add($target)
+                }
+            }
+            $targetBranches = @($keptTargets.ToArray())
+        }
+
         $runState.LocalBranchCount = $managedBranches.Count
         foreach ($branch in $targetBranches) { $runState.TargetBranches.Add($branch) }
 
         Write-StatusLine -Marker '✓' -Message "Local branches: $($managedBranches.Count)" -Color Green
         if ($targetBranches.Count -eq 0) {
-            Write-StatusLine -Marker '✓' -Message 'No branch consolidation is required.' -Color Green
+            $noTargetMsg = if (@($runState.SkippedBranches).Count -gt 0) {
+                'All selected branches were skipped (unmerged descendants); nothing consolidated.'
+            }
+            else { 'No branch consolidation is required.' }
+            Write-StatusLine -Marker '✓' -Message $noTargetMsg -Color Green
             $runState.Result = 'SUCCESS'
             $runState.MainPublished = 'NOT REQUIRED'
             return $true
