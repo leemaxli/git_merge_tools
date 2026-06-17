@@ -28,9 +28,13 @@ function Import-GitMergeToolsRuntimeModule {
     else {
         'GitMergeTools.Common.PowerShell51.psm1'
     }
+    if ($script:GitMergeToolsRuntimeModuleLoaded -eq $runtimeModuleName) {
+        return $runtimeModuleName
+    }
     $runtimeModulePath = Join-Path $PSScriptRoot $runtimeModuleName
     if (Test-Path -LiteralPath $runtimeModulePath) {
         Import-Module $runtimeModulePath -Force -ErrorAction Stop
+        $script:GitMergeToolsRuntimeModuleLoaded = $runtimeModuleName
         return $runtimeModuleName
     }
     return $null
