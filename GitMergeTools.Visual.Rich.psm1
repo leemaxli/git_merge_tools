@@ -51,7 +51,7 @@ function New-GitMergeToolsVisualRich {
         Git = '🔀'; Branch = '🌿'; Merge = '🔀'; Check = '✅'; Cross = '❌'; Sync = '🔄'; Rocket = '🚀'; Trash = '🧹'; Search = '🔍'; Cloud = '☁️'; Beaker = '🧪'; Status = '📊'
     }
 
-    $stageIcon = {
+    $resolveStageIcon = {
         param([string]$Icon)
         switch ($Icon) {
             'SCAN' { '🔍'; break }
@@ -89,7 +89,7 @@ function New-GitMergeToolsVisualRich {
     $writeStage = {
         param([string]$Title, [string]$Subtitle, [string]$StageIcon, [ConsoleColor]$Color = [ConsoleColor]::Cyan)
         Write-Host ''
-        Write-Host ("  ━━━━━━━━  {0}  {1}  ━━━━━━━━" -f (& $stageIcon $StageIcon), $Title) -ForegroundColor $Color
+        Write-Host ("  ━━━━━━━━  {0}  {1}  ━━━━━━━━" -f (& $resolveStageIcon $StageIcon), $Title) -ForegroundColor $Color
         if (-not [string]::IsNullOrWhiteSpace($Subtitle)) { Write-Host "    $Subtitle" -ForegroundColor $theme.Info }
         Write-Host ('  ' + ('─' * 62)) -ForegroundColor $theme.Divider
     }

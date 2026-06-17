@@ -19,16 +19,17 @@ Test-Case 'gitmerge debug returns true (dry-run, basic visuals)' {
     } finally { Remove-GitSandbox $sb }
 }
 
-# DOCUMENTED BUG #1 (spec §2): the rich renderer crashes at the first stage because the captured
-# $stageIcon helper collides with the $StageIcon parameter (PS variables are case-insensitive).
+# DEFECT #1 (spec §2) — FIXED: the rich renderer used to crash at the first stage because the captured
+# $stageIcon helper collided with the $StageIcon parameter (PS variables are case-insensitive), turning
+# the call into `& 'SCAN' 'SCAN'` -> CommandNotFound. The helper was renamed to $resolveStageIcon.
 # Invoking the full command under rich does NOT reliably select rich in a captured/non-interactive
 # test (the rich capability gate fails), so we exercise the Rich renderer directly here for a
-# deterministic reproduction. This is XFAIL until P1 fixes it.
-Test-Case 'rich renderer WriteStage crashes on a stage icon (defect #1)' -KnownFail {
+# deterministic reproduction.
+Test-Case 'rich renderer WriteStage renders a stage icon without crashing (defect #1 fixed)' {
     $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
     Import-Module (Join-Path $repoRoot 'GitMergeTools.Visual.Rich.psm1') -Force
     $r = New-GitMergeToolsVisualRich -CommandName 'gitmerge' -RequestedVisualMode 'rich' -RichUnavailableReasons @() -VisualWarningSuppressed:$true
-    # Defect #1: captured $stageIcon collides with the $StageIcon parameter (PS vars are case-insensitive),
-    # so this becomes `& 'SCAN' 'SCAN'` -> CommandNotFound. Once fixed it will NOT throw -> XPASS -> flip this test.
-    & $r.WriteStage -Title 'PREFLIGHT' -Subtitle 'x' -StageIcon 'SCAN' -Color ([ConsoleColor]::Cyan)
+    # Capture host output; must NOT throw (defect #1 was a $stageIcon/$StageIcon collision -> & 'SCAN' 'SCAN').
+    & $r.WriteStage -Title 'PREFLIGHT' -Subtitle 'x' -StageIcon 'SCAN' -Color ([ConsoleColor]::Cyan) *> $null
+    Assert-True $true 'WriteStage completed without throwing'
 }
