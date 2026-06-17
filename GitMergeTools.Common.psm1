@@ -230,7 +230,12 @@ function Test-GitMergeToolsRichVisualEnvironment {
     if ($null -eq [Console]::InputEncoding -or [Console]::InputEncoding.WebName -notmatch 'utf') {
         $reasons.Add('Console InputEncoding is not UTF-8.')
     }
-    if ([string]::IsNullOrWhiteSpace($env:WT_SESSION) -and [string]::IsNullOrWhiteSpace($env:TERM_PROGRAM) -and $env:TERM -eq 'dumb') {
+    $hasCapableTerminal = (
+        -not [string]::IsNullOrWhiteSpace($env:WT_SESSION) -or
+        -not [string]::IsNullOrWhiteSpace($env:TERM_PROGRAM) -or
+        (-not [string]::IsNullOrWhiteSpace($env:TERM) -and $env:TERM -ne 'dumb')
+    )
+    if (-not $hasCapableTerminal) {
         $reasons.Add('Terminal capability detection did not find Windows Terminal or a capable TERM.')
     }
 
@@ -345,6 +350,13 @@ function New-GitMergeToolsVisual {
         if ($candidate -eq 'rich' -and -not $richState.IsAvailable) {
             foreach ($reason in @($richState.Reasons)) { $fallbackReasons.Add($reason) }
             continue
+        }
+        if ($candidate -eq 'standard') {
+            $utf8Ok = ($null -ne [Console]::OutputEncoding -and [Console]::OutputEncoding.WebName -match 'utf')
+            if (-not $utf8Ok) {
+                $fallbackReasons.Add('Console OutputEncoding is not UTF-8; standard box-drawing is unavailable.')
+                continue
+            }
         }
 
         $selectedMode = $candidate

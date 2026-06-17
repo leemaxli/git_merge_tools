@@ -66,7 +66,12 @@ function Test-GitMergeToolsPowerShell7RichVisualEnvironment {
     if ($null -eq [Console]::InputEncoding -or [Console]::InputEncoding.WebName -notmatch 'utf') {
         $reasons.Add('Console InputEncoding is not UTF-8.')
     }
-    if ([string]::IsNullOrWhiteSpace($env:WT_SESSION) -and [string]::IsNullOrWhiteSpace($env:TERM_PROGRAM) -and $env:TERM -eq 'dumb') {
+    $hasCapableTerminal = (
+        -not [string]::IsNullOrWhiteSpace($env:WT_SESSION) -or
+        -not [string]::IsNullOrWhiteSpace($env:TERM_PROGRAM) -or
+        (-not [string]::IsNullOrWhiteSpace($env:TERM) -and $env:TERM -ne 'dumb')
+    )
+    if (-not $hasCapableTerminal) {
         $reasons.Add('Terminal capability detection did not find Windows Terminal or a capable TERM.')
     }
 
