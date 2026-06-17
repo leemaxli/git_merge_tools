@@ -36,12 +36,15 @@ function gitstatus {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
+            # Machine-parsed reads must NOT fold stderr into Output: a git warning (broken ref,
+            # advice, locale hint) would otherwise be parsed as a porcelain line / phantom branch
+            # (#4). stderr goes to the host error stream instead (matches gitmerge/gitsync).
             if ([string]::IsNullOrEmpty($WorkingDirectory)) {
                 if ($SuppressError) {
                     $rawOutput = @(& git @Arguments 2>$null)
                 }
                 else {
-                    $rawOutput = @(& git @Arguments 2>&1)
+                    $rawOutput = @(& git @Arguments)
                 }
             }
             else {
@@ -49,7 +52,7 @@ function gitstatus {
                     $rawOutput = @(& git -C $WorkingDirectory @Arguments 2>$null)
                 }
                 else {
-                    $rawOutput = @(& git -C $WorkingDirectory @Arguments 2>&1)
+                    $rawOutput = @(& git -C $WorkingDirectory @Arguments)
                 }
             }
             $exitCode = $LASTEXITCODE
