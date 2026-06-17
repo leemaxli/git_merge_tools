@@ -6,58 +6,66 @@ and Windows PowerShell 5.1); above the line is the remaining backlog.
 ## Backlog
 
 ### P3 — Structural refactor (largest remaining piece)
-- Extract the duplicated helpers (copy-pasted across `gitmerge.ps1`/`gitsync.ps1`/`gitstatus.ps1`)
-  into a shared `GitMergeTools.Core.psm1` (single source of truth: `Invoke-GitCommand`, ref/branch/
-  worktree helpers, `Get-Mode`, `Resolve-MainBranch`, …).
-- Extract the transactional merge engine into `GitMergeTools.Merge.psm1`; make the three commands
-  thin peers that consume it. **Remove the `gitsync → gitmerge` call** (they should be siblings on a
-  shared engine, not one invoking the other).
-- Fold the runtime/visual detection (`Common` + `PowerShell7/51`) into `GitMergeTools.Environment.psm1`.
-- Remove dead code (unused `$icons` tables, `RuntimeLevel`) and legacy aliases / env vars.
-- Single-directory module discovery (drop the XDG/Documents/OneDrive path ladder).
+- Extract a shared `GitMergeTools.Core.psm1` (single source of truth: one `Invoke-GitCommand`,
+  ref/branch/worktree helpers, `Get-Mode`, `Resolve-MainBranch`). The three commands currently carry
+  drifted copies. **Do this first** — lowest-risk, highest-certainty slice.
+- Extract the transactional merge engine into `GitMergeTools.Merge.psm1`; make the three commands thin
+  peers and **remove the `gitsync → gitmerge` call**. **Gate behind characterization tests** that prove
+  behavior-equivalence on the safety path (CAS / ancestor / clean-worktree / cleanup); land in one piece.
+- Fold runtime/visual detection (`Common` + `PowerShell7/51`) into `GitMergeTools.Environment.psm1`.
+- Single-directory module discovery (drop the XDG/Documents/OneDrive ladder). Note: the override var
+  changes from `GITMERGE_TOOLS_COMMON_MODULE` (a file) to `GITMERGE_TOOLS_HOME` (a dir) — document it.
+- Remove dead code (`$icons` tables, `RuntimeLevel`) and the legacy visual-mode aliases.
 
-### Git-safety hardening (lands with / after the engine unification)
-- Force UTF-8 decoding of captured git output, independent of console code page (cp936/OEM on 5.1
-  otherwise mojibakes non-ASCII branch names → wrong/skipped branch).
+### Git-safety hardening (lands with the engine unification)
 - Neutralize inherited `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`/… and pin `git -C <root>`.
-- One centralized non-interactive git-invocation profile (per command class): credential/pager/
-  color/optional-locks/`safe.directory`/gpg/hooks/rerere/timeouts — applied via `-c`/env, never by
-  mutating user config.
-- Preflight gates before creating the temp worktree: refuse on in-progress operations
-  (rebase/cherry-pick/revert/bisect), refuse unsupported repos (submodule/LFS/sparse/shallow/partial),
-  case-insensitive ref collisions, and MAX_PATH / disk-space (ENOSPC) fast-fail.
-- gitsync: return a structured result; report-only (no rollback) on push rejection with clear
-  messaging; classify lock conflicts as clean-fail concurrency outcomes.
-- Idempotent startup reclamation of orphaned `gitmerge-tmp-*` worktrees (finally is not guaranteed
-  under Ctrl-C/SIGTERM/SIGKILL); macOS `/var`→`/private/var` realpath fix in the cleanup guard.
+- A centralized non-interactive git profile — **core subset only**: `GIT_TERMINAL_PROMPT=0`,
+  non-interactive credentials, `GIT_SSH_COMMAND='ssh -o BatchMode=yes'`, transport timeouts,
+  `GIT_EDITOR=true`, `color.ui=false`/`core.quotepath=false` for machine reads, `rerere` off,
+  `GIT_OPTIONAL_LOCKS=0`. Respect signing/hooks (preflight + fail-closed); never blanket `--no-verify`.
+- Preflight: refuse on in-progress ops (rebase/cherry-pick/revert/bisect — **all** of them, resolved
+  per-worktree via `git rev-parse --git-path`); refuse **LFS / submodule / sparse-checkout** (these can
+  publish a wrong tree to main). *(shallow/partial clones are allowed — they don't corrupt the tree.)*
+- gitsync: structured result + report-only on push rejection + clean-fail on lock/CAS concurrency;
+  a meta-test grepping push args to permanently forbid `--force`.
+- Idempotent startup reclamation of orphaned `gitmerge-tmp-*` worktrees (incl. macOS realpath in the guard).
+- `ref` NFC normalization for comparison keys; `--` option terminator + `check-ref-format` on user refs.
+- A byte-consistency test: machine output (`--porcelain` / exit codes) identical across visual tiers.
 
-### Visual polish (`max` tier)
-- Distinctive `max`-tier effects through a single gated raw-ANSI/OSC sink: 24-bit truecolor
-  (gradients, Okabe-Ito palette), OSC 8 hyperlinks, OSC 9;4 taskbar/tab progress, dim/reverse.
-- Per-component upgrades that degrade cleanly: rounded-corner panels, recursive branch-topology tree,
-  reverse-video SUCCESS pill, per-stage Stopwatch timing badges, display-width-aware truncation.
-- Wire the upgrade advisory into the `gitsync` / `gitstatus` summaries too (currently `gitmerge` only).
-- Consolidate the suppress env var to a single `GITMERGE_SUPPRESS_WARNING`; add a `check` keyword
-  (env/config/capability report) and a config dump under `debug`.
+### Visual polish
+- Wire the upgrade advisory into `gitsync`/`gitstatus`; consolidate to a single
+  `GITMERGE_SUPPRESS_WARNING` (keep the old names as deprecated aliases); add a read-only `check` keyword.
+- Per-stage Stopwatch timing badges + a recursive branch-topology tree in the **rich** tier
+  (plain-text, capture-safe).
 
-### Verification
-- Full cross-runtime regression + edge tests for encoding, locale/i18n (non-ASCII branch names, repo
-  paths with spaces/Unicode), and concurrency.
+## Descoped — over-engineering, deliberately not building
+- **`max`-tier raw ANSI/OSC effects** (OSC 9;4 taskbar progress, truecolor gradients, rounded panels):
+  zero information gain for a seconds-long local git op, highest output-stream-leak risk. The `max`
+  shell/gate stays (it degrades cleanly to `rich`); its raw-byte content is deferred indefinitely. Until
+  then, the "upgrade to max" advisory should note that `max` currently renders identically to `rich`.
+- **ENOSPC `DriveInfo` predictive precheck** and **MAX_PATH predictive length fast-fail**: fragile
+  (TOCTOU / threshold-guessing). Keep only `-c core.longpaths=true`, let git fail cleanly, and let the
+  startup reclamation sweep the orphan. Classify ENOSPC at runtime only if cheap.
+- **Case-insensitive ref-collision refuse**: requires a user to create twin refs; at most a cheap
+  piggyback check inside the preflight loop, not a dedicated gate.
+- **The full `max` leak-test matrix**: deferred together with the raw-byte content it guards.
 
 ---
 
 ## Done
 
-- **Defects fixed (each with a red→green regression test):**
-  - rich-mode crash from a `$stageIcon`/`$StageIcon` variable-name collision
-  - gitsync reporting a successful push as `FAILED`; destructive prune-on-sync
-  - terminal-capability detection treating a bare console as rich-capable
-  - `standard` tier rendering without a UTF-8 gate
-  - silent-mode env var only matching the literal `1`
-  - redundant runtime-module reloads
-  - bareword refs that a same-named tag/remote could shadow → now fully-qualified
-  - unconditional `git merge --abort` (now guarded by an actual merge-in-progress check)
-- **Features:** 4-tier `max/rich/standard/basic` visual selection gated on a capability profile;
-  upgrade advisory (in `gitmerge`); skip-with-warning for a target that has an unmerged descendant branch.
-- **Tests:** a dependency-free harness (no Pester) with hermetic, sandboxed throwaway repos + a
-  path-containment guard, smoke/characterization/safety tests, and a cross-runtime driver.
+- **Bug fixes (each with a red→green regression test, green on both runtimes):**
+  - `#1` UTF-8 decode of git output — non-ASCII branch names survive a cp936/GBK redirected stdout
+    (otherwise `merge`/`push refs/heads/<name>` targeted the wrong ref).
+  - `#2`-twin — `gitmerge` fetch is non-destructive; never prunes local-only tags.
+  - `#3` — `gitsync` honors the `#10` unmerged-descendant skip in its push set (no misreport).
+  - `#4` — `gitstatus` no longer folds git stderr into parsed porcelain output (no phantom branches).
+  - `#5` — display-width-aware banner truncation/padding for CJK & emoji.
+  - earlier defects: rich `$stageIcon`/`$StageIcon` crash; `gitsync` false-FAIL + destructive prune;
+    terminal-capability detection; `standard` UTF-8 gate; silent-mode truthiness; module reload;
+    fully-qualified refs; `merge --abort` guard; unmerged-descendant skip (`#10`).
+- **Features:** 4-tier `max/rich/standard/basic` selection gated on a capability profile; upgrade
+  advisory (in `gitmerge`); display-width helpers (`Get-GitMergeToolsDisplayWidth` /
+  `Format-GitMergeToolsFixedWidth`).
+- **Tests:** dependency-free harness (no Pester), hermetic sandboxed repos + a path-containment guard,
+  smoke/characterization/safety suites, and a cross-runtime driver. **54 passing on both runtimes.**
