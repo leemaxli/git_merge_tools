@@ -48,6 +48,7 @@ function New-GitMergeToolsVisualStandard {
     $getCommandDescription = (Get-Command Get-GitMergeToolsCommandDescription -ErrorAction Stop).ScriptBlock
     $getMarkerColor = (Get-Command Get-GitMergeToolsMarkerColor -ErrorAction Stop).ScriptBlock
     $writeFallbackNotice = (Get-Command Write-GitMergeToolsRichFallbackNotice -ErrorAction Stop).ScriptBlock
+    $formatFixedWidth = (Get-Command Format-GitMergeToolsFixedWidth -ErrorAction Stop).ScriptBlock
     $icons = @{ Git='GIT'; Branch='*'; Merge='M'; Check='OK'; Cross='FAIL'; Sync='SYNC'; Rocket='PUSH'; Trash='CLEAN'; Search='SCAN'; Cloud='REMOTE'; Beaker='MERGE'; Status='STATUS' }
 
     $writeRunBanner = {
@@ -56,10 +57,9 @@ function New-GitMergeToolsVisualStandard {
         $frameColor = if ($DryRun) { $theme.BannerDry } else { $theme.Banner }
         $description = & $getCommandDescription $Name
         $title = if ($DryRun) { "$($Name.ToUpperInvariant())  DEBUG / DRY-RUN  Preview only; refs unchanged" } else { "$($Name.ToUpperInvariant())  $description" }
-        if ($title.Length -gt 58) { $title = $title.Substring(0, 58) }
         Write-Host ''
         Write-Host '╔══════════════════════════════════════════════════════════════╗' -ForegroundColor $frameColor
-        Write-Host ("║  {0,-58}║" -f $title) -ForegroundColor $frameColor
+        Write-Host ("║  {0}║" -f (& $formatFixedWidth -Text $title -Width 58)) -ForegroundColor $frameColor
         Write-Host '╚══════════════════════════════════════════════════════════════╝' -ForegroundColor $frameColor
         Write-Host ''
     }

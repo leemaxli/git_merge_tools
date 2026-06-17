@@ -173,10 +173,75 @@ function New-GitMergeToolsVisualObject {
     }
 }
 
+function Test-GitMergeToolsWideCodePoint {
+    [CmdletBinding()]
+    param([int]$CodePoint)
+
+    # East-Asian Wide/Fullwidth ranges (and common emoji), enough to size CJK branch names / titles.
+    # Not a full UAX#11 table — a pragmatic, dependency-free approximation.
+    return (
+        ($CodePoint -ge 0x1100 -and $CodePoint -le 0x115F) -or   # Hangul Jamo
+        ($CodePoint -ge 0x2E80 -and $CodePoint -le 0x303E) -or   # CJK radicals .. Kangxi
+        ($CodePoint -ge 0x3041 -and $CodePoint -le 0x33FF) -or   # Hiragana .. CJK symbols
+        ($CodePoint -ge 0x3400 -and $CodePoint -le 0x4DBF) -or   # CJK Ext A
+        ($CodePoint -ge 0x4E00 -and $CodePoint -le 0x9FFF) -or   # CJK Unified
+        ($CodePoint -ge 0xA000 -and $CodePoint -le 0xA4CF) -or   # Yi
+        ($CodePoint -ge 0xAC00 -and $CodePoint -le 0xD7A3) -or   # Hangul syllables
+        ($CodePoint -ge 0xF900 -and $CodePoint -le 0xFAFF) -or   # CJK compat ideographs
+        ($CodePoint -ge 0xFE30 -and $CodePoint -le 0xFE4F) -or   # CJK compat forms
+        ($CodePoint -ge 0xFF00 -and $CodePoint -le 0xFF60) -or   # Fullwidth forms
+        ($CodePoint -ge 0xFFE0 -and $CodePoint -le 0xFFE6) -or   # Fullwidth signs
+        ($CodePoint -ge 0x1F300 -and $CodePoint -le 0x1FAFF) -or # emoji / pictographs
+        ($CodePoint -ge 0x20000 -and $CodePoint -le 0x3FFFD)     # CJK Ext B+
+    )
+}
+
+function Get-GitMergeToolsDisplayWidth {
+    [CmdletBinding()]
+    [OutputType([int])]
+    param([AllowEmptyString()][string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) { return 0 }
+    $width = 0
+    $enum = [System.Globalization.StringInfo]::GetTextElementEnumerator($Text)
+    while ($enum.MoveNext()) {
+        $element = [string]$enum.Current
+        $codePoint = [System.Char]::ConvertToUtf32($element, 0)
+        $width += if (Test-GitMergeToolsWideCodePoint $codePoint) { 2 } else { 1 }
+    }
+    return $width
+}
+
+function Format-GitMergeToolsFixedWidth {
+    # Truncate (by DISPLAY width, never splitting a surrogate pair / text element) and right-pad with
+    # spaces to exactly $Width display columns. Replaces String.Length / Substring framing (#5).
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([AllowEmptyString()][string]$Text, [Parameter(Mandatory)][int]$Width)
+
+    if ($null -eq $Text) { $Text = '' }
+    if ($Width -le 0) { return '' }
+    $builder = [System.Text.StringBuilder]::new()
+    $used = 0
+    $enum = [System.Globalization.StringInfo]::GetTextElementEnumerator($Text)
+    while ($enum.MoveNext()) {
+        $element = [string]$enum.Current
+        $codePoint = [System.Char]::ConvertToUtf32($element, 0)
+        $elementWidth = if (Test-GitMergeToolsWideCodePoint $codePoint) { 2 } else { 1 }
+        if (($used + $elementWidth) -gt $Width) { break }
+        [void]$builder.Append($element)
+        $used += $elementWidth
+    }
+    if ($used -lt $Width) { [void]$builder.Append(' ' * ($Width - $used)) }
+    return $builder.ToString()
+}
+
 Export-ModuleMember -Function @(
     'New-GitMergeToolsVisualContext',
     'New-GitMergeToolsVisualObject',
     'Get-GitMergeToolsCommandDescription',
     'Get-GitMergeToolsMarkerColor',
-    'Write-GitMergeToolsRichFallbackNotice'
+    'Write-GitMergeToolsRichFallbackNotice',
+    'Get-GitMergeToolsDisplayWidth',
+    'Format-GitMergeToolsFixedWidth'
 )

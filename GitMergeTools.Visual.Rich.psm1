@@ -47,6 +47,7 @@ function New-GitMergeToolsVisualRich {
     $theme = $context.Theme
     $getCommandDescription = (Get-Command Get-GitMergeToolsCommandDescription -ErrorAction Stop).ScriptBlock
     $getMarkerColor = (Get-Command Get-GitMergeToolsMarkerColor -ErrorAction Stop).ScriptBlock
+    $formatFixedWidth = (Get-Command Format-GitMergeToolsFixedWidth -ErrorAction Stop).ScriptBlock
     $icons = @{
         Git = '🔀'; Branch = '🌿'; Merge = '🔀'; Check = '✅'; Cross = '❌'; Sync = '🔄'; Rocket = '🚀'; Trash = '🧹'; Search = '🔍'; Cloud = '☁️'; Beaker = '🧪'; Status = '📊'
     }
@@ -70,7 +71,6 @@ function New-GitMergeToolsVisualRich {
         $frameColor = if ($DryRun) { $theme.BannerDry } else { $theme.Banner }
         $description = & $getCommandDescription $Name
         $title = if ($DryRun) { "$($Name.ToUpperInvariant())  DEBUG / DRY-RUN  Preview only; refs unchanged" } else { "$($Name.ToUpperInvariant())  $description" }
-        if ($title.Length -gt 54) { $title = $title.Substring(0, 54) }
         $prefix = if ($DryRun) { '🔬' } elseif ($Name -eq 'gitstatus') { '📊' } elseif ($Name -eq 'gitsync') { '🔄' } else { '🔀' }
         Write-Host ''
         Write-Host '         ██████╗ ██╗████████╗' -ForegroundColor $frameColor
@@ -81,7 +81,7 @@ function New-GitMergeToolsVisualRich {
         Write-Host '         ╚═════╝ ╚═╝   ╚═╝   ' -ForegroundColor $frameColor
         Write-Host ''
         Write-Host '╔══════════════════════════════════════════════════════════════╗' -ForegroundColor $frameColor
-        Write-Host ("║  {0,-56}  ║" -f "$prefix $title") -ForegroundColor $frameColor
+        Write-Host ("║  {0}  ║" -f (& $formatFixedWidth -Text "$prefix $title" -Width 56)) -ForegroundColor $frameColor
         Write-Host '╚══════════════════════════════════════════════════════════════╝' -ForegroundColor $frameColor
         Write-Host ''
     }
