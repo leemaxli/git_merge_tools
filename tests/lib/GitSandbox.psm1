@@ -29,7 +29,15 @@ function Invoke-SandboxGit {
     param([Parameter(Mandatory)][string]$RepoPath, [Parameter(Mandatory)][string[]]$Arguments)
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = 'git'
-    foreach ($a in @('-C', $RepoPath) + $Arguments) { [void]$psi.ArgumentList.Add($a) }
+    $all = @('-C', $RepoPath) + $Arguments
+    if ($psi.PSObject.Properties['ArgumentList']) {
+        foreach ($a in $all) { [void]$psi.ArgumentList.Add($a) }
+    } else {
+        # Windows PowerShell 5.1 / .NET Framework: no ArgumentList — build a quoted string.
+        $psi.Arguments = ($all | ForEach-Object {
+            if ($_ -match '[\s"]') { '"' + ($_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"' } else { $_ }
+        }) -join ' '
+    }
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.UseShellExecute = $false
@@ -37,14 +45,18 @@ function Invoke-SandboxGit {
     $psi.StandardOutputEncoding = $utf8
     $psi.StandardErrorEncoding = $utf8
     $p = [System.Diagnostics.Process]::Start($psi)
-    $out = $p.StandardOutput.ReadToEnd()
-    $errOut = $p.StandardError.ReadToEnd()
-    $p.WaitForExit()
+    try {
+        $errTask = $p.StandardError.ReadToEndAsync()   # read stderr async to avoid pipe-buffer deadlock
+        $out = $p.StandardOutput.ReadToEnd()
+        $errOut = $errTask.GetAwaiter().GetResult()
+        $p.WaitForExit()
+        $code = $p.ExitCode
+    } finally { $p.Dispose() }
     $lines = @()
     foreach ($chunk in @($out, $errOut)) {
         if (-not [string]::IsNullOrEmpty($chunk)) { $lines += ($chunk -split "`r?`n") }
     }
-    return [pscustomobject]@{ ExitCode = $p.ExitCode; Output = [string[]]@($lines | Where-Object { $_ -ne '' }) }
+    return [pscustomobject]@{ ExitCode = $code; Output = [string[]]@($lines | Where-Object { $_ -ne '' }) }
 }
 
 function New-GitSandbox {
@@ -54,18 +66,18 @@ function New-GitSandbox {
 
     $id = [guid]::NewGuid().ToString('N')
     $root = Join-Path ([System.IO.Path]::GetTempPath()) "gmt-tests-$id"
-    $home = Join-Path $root 'home'
+    $homeDir = Join-Path $root 'home'
     $repo = Join-Path $root 'repo'
-    New-Item -ItemType Directory -Path $home -Force | Out-Null
+    New-Item -ItemType Directory -Path $homeDir -Force | Out-Null
     New-Item -ItemType Directory -Path $repo -Force | Out-Null
     $script:Sandboxes.Add($root)
 
     # Hermetic git environment (spec §21). Process-scoped env; each test sets these before git runs.
-    $env:HOME = $home
-    if (Test-IsWindowsRuntime) { $env:USERPROFILE = $home }
-    $env:XDG_CONFIG_HOME = (Join-Path $home '.config')
+    $env:HOME = $homeDir
+    if (Test-IsWindowsRuntime) { $env:USERPROFILE = $homeDir }
+    $env:XDG_CONFIG_HOME = (Join-Path $homeDir '.config')
     $env:GIT_CONFIG_NOSYSTEM = '1'
-    $env:GIT_CONFIG_GLOBAL = (Join-Path $home '.gitconfig')
+    $env:GIT_CONFIG_GLOBAL = (Join-Path $homeDir '.gitconfig')
     $env:GIT_CONFIG_SYSTEM = if (Test-IsWindowsRuntime) { 'NUL' } else { '/dev/null' }
     foreach ($v in 'GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE','GIT_OBJECT_DIRECTORY','GIT_COMMON_DIR') {
         Remove-Item -LiteralPath "Env:$v" -ErrorAction SilentlyContinue
@@ -80,7 +92,7 @@ function New-GitSandbox {
     $init = Invoke-SandboxGit $repo @('init', '-b', $DefaultBranch)
     if ($init.ExitCode -ne 0) { throw "git init failed: $($init.Output -join '; ')" }
 
-    return [pscustomobject]@{ Root = $root; Repo = $repo; Home = $home; DefaultBranch = $DefaultBranch }
+    return [pscustomobject]@{ Root = $root; Repo = $repo; Home = $homeDir; DefaultBranch = $DefaultBranch }
 }
 
 function Assert-PathInSandbox {
@@ -138,6 +150,7 @@ function Remove-SandboxPath {
         try { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop; return }
         catch { Start-Sleep -Milliseconds 150 }
     }
+    Write-Warning "Could not remove sandbox path: $Path"
 }
 
 function Clear-AllSandboxes {
