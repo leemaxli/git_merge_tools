@@ -2,6 +2,8 @@
 
 :cn: **简体中文** · [:us: English](README.en.md)
 
+**当前版本 v5.2.0** · 见下方[版本历史](#版本历史)
+
 跨平台 PowerShell 工具,用于**安全、事务式**地在本地把 Git 分支经 main 整合,并带一套按终端能力
 自动降级的视觉层。可运行于 **PowerShell 7+**(优先)与 **Windows PowerShell 5.1**,支持
 Windows / Linux / macOS。
@@ -77,8 +79,38 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # 仅当前运行时
 
 ## 状态
 
-功能完整、测试充分(已知缺陷全部修复;两运行时测试全绿)。结构性重构(把共享 helper 抽成模块、
-去掉命令间耦合)进行中。
+功能完整、测试充分(已知缺陷全部修复;两运行时 57 项测试全绿)。**结构性重构主体已完成**:已抽出
+`Core.psm1`(git 原语)与 `Merge.psm1`(事务引擎),三条命令成为同一引擎上的薄壳并去除了命令间耦合;
+后续的环境模块合并与 git 安全加固按路线图推进中。
+
+## 版本历史
+
+> 当前版本:**v5.2.0**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
+
+**v5.x —— 模块化与引擎统一(当前)**
+- **v5.2.0** —— 抽出 `Merge.psm1` 事务引擎;`gitmerge`/`gitsync` 成为同一引擎上的薄壳,**移除 `gitsync → gitmerge` 调用**。
+- **v5.1.0** —— 抽出 `Core.psm1`(git 原语唯一真源),三命令共用;为合并引擎补全特征化测试网。
+- **v5.0.0** —— 潜伏缺陷清扫:强制 UTF-8 捕获 git 输出(非 ASCII 分支名)、`gitmerge` 非破坏性 fetch、`gitsync` 遵守子分支跳过、`gitstatus` 不把 stderr 混入 porcelain、按显示宽度的横幅截断;并裁掉过度设计、清理死代码。
+
+**v4.x —— Claude 强化与开源发布**
+- **v4.3.0** —— 公开发布:双语 README(中文默认)、MIT 许可证、路线图;发布到 GitHub。
+- **v4.2.0** —— Git 安全加固:全限定 ref(防同名 tag/remote 遮蔽)、`merge --abort` 守护、`gitsync` 结果顺序与非破坏性 fetch、未合并后代分支跳过。
+- **v4.1.0** —— 视觉/运行时:修 rich 崩溃、终端能力探测、`standard` UTF-8 门槛、静默真值解析;引入能力画像、4 档 `max/rich/standard/basic` 选择与升级建议。
+- **v4.0.0** —— 无依赖测试体系:沙箱化一次性仓库、路径 containment 守护、跨运行时驱动与特征化测试。
+
+**v3.x —— 视觉进阶与 Git 化(早期追溯)**
+- **v3.2** —— `max` 顶档实验(truecolor / 终端转义效果探索)。
+- **v3.1** —— `rich` 档成型:emoji、Unicode 框线、分阶段彩色输出。
+- **v3.0** —— 开始用 Git 做版本控制;视觉层从纯文本走向分档渲染。
+
+**v2.x —— 三命令与基础视觉(追溯)**
+- **v2.2** —— 基础视觉:阶段标题、状态行、结果摘要。
+- **v2.1** —— `gitstatus` 雏形(只读增强 status)。
+- **v2.0** —— 在 `gitmerge` 外新增 `gitsync` 与 `gitpush`(原子推送,后并入 `gitsync`)。
+
+**v1.x —— 起源(追溯,Git 之前)**
+- **v1.1** —— 事务式临时 worktree 集成、`--ff-only` 推进。
+- **v1.0** —— 最初的 `gitmerge`:把本地分支经 `main` 整合的单一脚本。
 
 ## 许可证
 

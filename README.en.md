@@ -2,6 +2,8 @@
 
 [:cn: 简体中文](README.md) · :us: **English**
 
+**Current version v5.2.0** · see [Version history](#version-history) below
+
 Cross-platform PowerShell helpers for **safe, transactional** local Git branch consolidation —
 with an auto-degrading, capability-aware visual layer. Runs on **PowerShell 7+** (preferred) and
 **Windows PowerShell 5.1**, on Windows / Linux / macOS.
@@ -80,8 +82,40 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # current runtime only
 
 ## Status
 
-Functional and fully tested (all known defects fixed; suite green on both runtimes). A structural
-refactor (extracting shared helpers into modules, removing cross-command coupling) is in progress.
+Functional and fully tested (all known defects fixed; 57-test suite green on both runtimes). **The
+core of the structural refactor is done**: `Core.psm1` (git primitives) and `Merge.psm1` (the
+transactional engine) are extracted, the three commands are thin peers on one engine with no
+cross-command coupling; the remaining environment-module merge and git-safety hardening are in progress.
+
+## Version history
+
+> Current version: **v5.2.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
+> from v4 on, the history follows the Git commit log.
+
+**v5.x — Modularization & engine unification (current)**
+- **v5.2.0** — Extracted the `Merge.psm1` transactional engine; `gitmerge`/`gitsync` became thin peers on one engine, **removing the `gitsync → gitmerge` call**.
+- **v5.1.0** — Extracted `Core.psm1` (single source of truth for git primitives), consumed by all three commands; added a characterization test net for the merge engine.
+- **v5.0.0** — Latent-bug sweep: force UTF-8 capture of git output (non-ASCII branch names), non-destructive `gitmerge` fetch, `gitsync` honoring the sub-branch skip, `gitstatus` not folding stderr into porcelain, display-width-aware banner truncation; plus over-engineering descoped and dead code removed.
+
+**v4.x — Claude-driven hardening & open-source release**
+- **v4.3.0** — Public release: bilingual README (Chinese default), MIT license, roadmap; published to GitHub.
+- **v4.2.0** — Git-safety hardening: fully-qualified refs (no tag/remote shadowing), `merge --abort` guard, `gitsync` result ordering & non-destructive fetch, unmerged-descendant skip.
+- **v4.1.0** — Visual/runtime: fixed the rich crash, terminal-capability detection, the `standard` UTF-8 gate, truthy suppress parsing; added the capability profile, 4-tier `max/rich/standard/basic` selection, and the upgrade advisory.
+- **v4.0.0** — Dependency-free test system: hermetic throwaway repos, a path-containment guard, a cross-runtime driver, and characterization tests.
+
+**v3.x — Visual progression & Git adoption (early retrospective)**
+- **v3.2** — `max` top-tier experiments (truecolor / terminal-escape effects).
+- **v3.1** — The `rich` tier took shape: emoji, Unicode box-drawing, per-stage colored output.
+- **v3.0** — Began using Git for version control; the visual layer evolved from plain text toward tiered rendering.
+
+**v2.x — Three commands & basic visuals (retrospective)**
+- **v2.2** — Basic visual style: stage headers, status lines, a result summary.
+- **v2.1** — First `gitstatus` (read-only enhanced status).
+- **v2.0** — Added `gitsync` and `gitpush` alongside `gitmerge` (atomic push; later folded into `gitsync`).
+
+**v1.x — Genesis (retrospective, pre-Git)**
+- **v1.1** — Transactional temporary-worktree integration; `--ff-only` advancement.
+- **v1.0** — The first `gitmerge`: a single script consolidating local branches through `main`.
 
 ## License
 
