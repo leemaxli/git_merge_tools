@@ -315,6 +315,76 @@ function Write-GitMergeToolsRecommendationSummary {
     Write-Host "  Suppress notice           : `$env:GITMERGE_TOOLS_SUPPRESS_WARNING='1'" -ForegroundColor DarkGray
 }
 
+function Resolve-GitMergeToolsColorLevel {
+    # Pure precedence cascade. Returns 0 (none) | 1 (16) | 2 (256) | 3 (truecolor).
+    [CmdletBinding()]
+    param(
+        [bool]$IsRedirected,
+        [bool]$NoColor,
+        [string]$ColorTerm,
+        [string]$WtSession,
+        [string]$Term,
+        [int]$WindowsBuild
+    )
+    if ($NoColor) { return 0 }
+    if ($IsRedirected) { return 0 }
+    if (-not [string]::IsNullOrWhiteSpace($Term) -and $Term -eq 'dumb') { return 0 }
+    if (-not [string]::IsNullOrWhiteSpace($ColorTerm) -and $ColorTerm -match '^(truecolor|24bit)$') { return 3 }
+    if (-not [string]::IsNullOrWhiteSpace($WtSession)) { return 3 }
+    if ($WindowsBuild -ge 14931) { return 3 }
+    if (-not [string]::IsNullOrWhiteSpace($Term) -and $Term -match '-256(color)?$') { return 2 }
+    return 1
+}
+
+function Get-GitMergeToolsCapabilityProfile {
+    # Read-only capability probe. Never mutates env / $PSStyle / console.
+    [CmdletBinding()]
+    param()
+
+    $isRedirected = $false
+    try { $isRedirected = [Console]::IsOutputRedirected } catch { $isRedirected = $false }
+    # mintty/MSYS report redirected over named pipes even when interactive — don't lock them out.
+    if ($isRedirected -and -not [string]::IsNullOrWhiteSpace($env:MSYSTEM)) { $isRedirected = $false }
+
+    $noColor = ($null -ne [Environment]::GetEnvironmentVariable('NO_COLOR'))
+
+    $isCI = (
+        -not [string]::IsNullOrWhiteSpace($env:CI) -or
+        -not [string]::IsNullOrWhiteSpace($env:GITHUB_ACTIONS) -or
+        (-not [string]::IsNullOrWhiteSpace($env:TF_BUILD) -and -not [string]::IsNullOrWhiteSpace($env:AGENT_NAME)) -or
+        -not [string]::IsNullOrWhiteSpace($env:GITLAB_CI)
+    )
+
+    $hasVt = $false
+    try { $hasVt = [bool]$Host.UI.SupportsVirtualTerminal } catch { $hasVt = $false }
+    if (-not $hasVt -and -not [string]::IsNullOrWhiteSpace($env:WT_SESSION)) { $hasVt = $true }
+
+    $unicodeOk = ($null -ne [Console]::OutputEncoding -and [Console]::OutputEncoding.WebName -match 'utf')
+
+    $windowsBuild = 0
+    try {
+        $isWindowsRuntime = ($PSVersionTable.PSEdition -eq 'Desktop' -or $PSVersionTable.Platform -eq 'Win32NT' -or $IsWindows)
+        if ($isWindowsRuntime) { $windowsBuild = [Environment]::OSVersion.Version.Build }
+    } catch { $windowsBuild = 0 }
+
+    $colorLevel = Resolve-GitMergeToolsColorLevel -IsRedirected $isRedirected -NoColor $noColor `
+        -ColorTerm $env:COLORTERM -WtSession $env:WT_SESSION -Term $env:TERM -WindowsBuild $windowsBuild
+
+    $width = 80
+    try { if (-not $isRedirected) { $width = [Console]::WindowWidth } } catch { $width = 80 }
+    if ($width -lt 40) { $width = 40 } elseif ($width -gt 110) { $width = 110 }
+
+    return [pscustomobject]@{
+        IsRedirected = [bool]$isRedirected
+        NoColor      = [bool]$noColor
+        IsCI         = [bool]$isCI
+        HasVT        = [bool]$hasVt
+        UnicodeOk    = [bool]$unicodeOk
+        ColorLevel   = [int]$colorLevel
+        Width        = [int]$width
+    }
+}
+
 function New-GitMergeToolsVisual {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSUseShouldProcessForStateChangingFunctions',
@@ -396,5 +466,7 @@ Export-ModuleMember -Function @(
     'New-GitMergeToolsVisual',
     'Resolve-GitMergeToolsScript',
     'Resolve-GitMergeToolsModule',
-    'Write-GitMergeToolsRecommendationSummary'
+    'Write-GitMergeToolsRecommendationSummary',
+    'Resolve-GitMergeToolsColorLevel',
+    'Get-GitMergeToolsCapabilityProfile'
 )
