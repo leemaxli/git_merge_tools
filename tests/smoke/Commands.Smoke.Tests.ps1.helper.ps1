@@ -38,3 +38,33 @@ function Invoke-ProductCommand {
         $env:GITMERGE_TOOLS_HOME = $prevHome
     }
 }
+
+function Invoke-ProductCommandText {
+    # Like Invoke-ProductCommand but returns ALL captured output (every stream) as one string,
+    # for asserting on warnings/messages. (git failure warnings surface regardless of suppress.)
+    param([Parameter(Mandatory)][string]$Script, [Parameter(Mandatory)][string]$Func,
+        [string]$Arg = '', [Parameter(Mandatory)]$Sandbox, [string]$VisualMode = 'basic')
+    $prevCwd = (Get-Location).Path
+    $prevVisual = $env:GITMERGE_VISUAL_MODE
+    $prevSuppress = $env:GITMERGE_TOOLS_SUPPRESS_WARNING
+    $prevHome = $env:GITMERGE_TOOLS_HOME
+    try {
+        Set-Location -LiteralPath $Sandbox.Repo
+        $env:GITMERGE_VISUAL_MODE = $VisualMode
+        $env:GITMERGE_TOOLS_SUPPRESS_WARNING = '1'
+        $env:GITMERGE_TOOLS_HOME = $repoRoot
+        $scriptFullPath = Join-Path $repoRoot $Script
+        $invoker = {
+            param($ScriptPath, $FuncName, $FuncArg)
+            . $ScriptPath
+            if ($FuncArg) { & $FuncName $FuncArg } else { & $FuncName }
+        }
+        return (& $invoker $scriptFullPath $Func $Arg *>&1 | Out-String)
+    }
+    finally {
+        Set-Location -LiteralPath $prevCwd
+        $env:GITMERGE_VISUAL_MODE = $prevVisual
+        $env:GITMERGE_TOOLS_SUPPRESS_WARNING = $prevSuppress
+        $env:GITMERGE_TOOLS_HOME = $prevHome
+    }
+}

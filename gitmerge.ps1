@@ -884,9 +884,12 @@ function gitmerge {
                     $runState.ConflictBranch = $branch
                     $runState.FailedBranches.Add($branch)
                     $runState.FailureReason = "Temporary integration failed while merging '$branch'."
-                    $abort = Invoke-GitCommand $temporaryWorktree @('merge', '--abort') -MergeError
-                    if ($abort.ExitCode -ne 0) {
-                        Write-GitFailure 'Cannot abort the temporary merge; leaving temporary state for manual inspection' $abort
+                    $mergeInProgress = (Invoke-GitCommand $temporaryWorktree @('rev-parse', '--verify', '-q', 'MERGE_HEAD') -SuppressError).ExitCode -eq 0
+                    if ($mergeInProgress) {
+                        $abort = Invoke-GitCommand $temporaryWorktree @('merge', '--abort') -MergeError
+                        if ($abort.ExitCode -ne 0) {
+                            Write-GitFailure 'Cannot abort the temporary merge; leaving temporary state for manual inspection' $abort
+                        }
                     }
                     Write-Warning "Main and target refs were not changed. Resolve '$branch' manually, then retry."
                     return $false
