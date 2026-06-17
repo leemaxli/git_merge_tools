@@ -21,14 +21,18 @@ function Invoke-ProductCommand {
         # scriptblock has no file association, so $PSScriptRoot/$PSCommandPath are empty inside the
         # product's nested functions and its `Split-Path -Parent $PSCommandPath` throws. Dot-sourcing
         # the actual file gives the product the same $PSScriptRoot it gets when run as a script.
-        $scriptFullPath = Join-Path $repoRoot $Script
+        # Load ALL three tools into one scope (as a real user profile does), so peer commands like
+        # gitsync can resolve gitmerge. Dot-sourcing only defines functions (no load-time side effects).
         $invoker = {
-            param($ScriptPath, $FuncName, $FuncArg)
-            . $ScriptPath
+            param($RepoRoot, $FuncName, $FuncArg)
+            foreach ($s in 'gitmerge.ps1', 'gitsync.ps1', 'gitstatus.ps1') {
+                $p = Join-Path $RepoRoot $s
+                if (Test-Path -LiteralPath $p) { . $p }
+            }
             $gmtResult = if ($FuncArg) { & $FuncName $FuncArg } else { & $FuncName }
             @($gmtResult | Where-Object { $_ -is [bool] }) | Select-Object -Last 1
         }
-        $result = & $invoker $scriptFullPath $Func $Arg 2>&1 | Where-Object { $_ -is [bool] } | Select-Object -Last 1
+        $result = & $invoker $repoRoot $Func $Arg 2>&1 | Where-Object { $_ -is [bool] } | Select-Object -Last 1
         return [bool]$result
     }
     finally {
@@ -53,13 +57,15 @@ function Invoke-ProductCommandText {
         $env:GITMERGE_VISUAL_MODE = $VisualMode
         $env:GITMERGE_TOOLS_SUPPRESS_WARNING = '1'
         $env:GITMERGE_TOOLS_HOME = $repoRoot
-        $scriptFullPath = Join-Path $repoRoot $Script
         $invoker = {
-            param($ScriptPath, $FuncName, $FuncArg)
-            . $ScriptPath
+            param($RepoRoot, $FuncName, $FuncArg)
+            foreach ($s in 'gitmerge.ps1', 'gitsync.ps1', 'gitstatus.ps1') {
+                $p = Join-Path $RepoRoot $s
+                if (Test-Path -LiteralPath $p) { . $p }
+            }
             if ($FuncArg) { & $FuncName $FuncArg } else { & $FuncName }
         }
-        return (& $invoker $scriptFullPath $Func $Arg *>&1 | Out-String)
+        return (& $invoker $repoRoot $Func $Arg *>&1 | Out-String)
     }
     finally {
         Set-Location -LiteralPath $prevCwd

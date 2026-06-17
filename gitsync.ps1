@@ -476,7 +476,7 @@ function gitsync {
         return $true
     }
 
-    $fetch = Invoke-GitCommand $repository @('fetch', 'origin', '--prune') -MergeError
+    $fetch = Invoke-GitCommand $repository @('-c', 'fetch.prune=false', '-c', 'fetch.pruneTags=false', 'fetch', 'origin') -MergeError
     if ($fetch.ExitCode -ne 0) {
         Write-GitFailure 'Fetch from origin failed' $fetch
         $failureReason = 'Fetch from origin failed.'
@@ -536,15 +536,19 @@ function gitsync {
         $pushedBranches.Add($branch)
         Write-StatusLine -Marker '✓' -Message "Pushed '$branch' to origin/$branch." -Color Green
     }
-
-    $refresh = Invoke-GitCommand $repository @('fetch', 'origin', '--prune') -MergeError
-    if ($refresh.ExitCode -ne 0) {
-        Write-GitFailure 'Remote-tracking refresh failed after push' $refresh
-        $failureReason = 'Remote-tracking refresh failed after push.'
-        return $false
-    }
-    Write-StatusLine -Marker '✓' -Message 'Remote-tracking refs refreshed.' -Color Green
+    # The push above is the irreversible, authoritative result — mark SUCCESS now so a failure of the
+    # best-effort remote-tracking refresh below can never misreport a completed push as FAILED (#2).
     $syncResult = 'SUCCESS'
+
+    # Refresh remote-tracking refs (best-effort, non-destructive: never prune local tags/refs as a side
+    # effect of a sync). A failure here is a warning, not a failure of the already-completed push.
+    $refresh = Invoke-GitCommand $repository @('-c', 'fetch.prune=false', '-c', 'fetch.pruneTags=false', 'fetch', 'origin') -MergeError
+    if ($refresh.ExitCode -ne 0) {
+        Write-Warning 'Remote-tracking refresh after push failed; the push already succeeded. Run "git fetch origin" later to refresh.'
+    }
+    else {
+        Write-StatusLine -Marker '✓' -Message 'Remote-tracking refs refreshed.' -Color Green
+    }
     Write-Host 'gitsync finished.' -ForegroundColor Green
     return $true
     }
