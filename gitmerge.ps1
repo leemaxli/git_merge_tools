@@ -258,6 +258,9 @@ function gitmerge {
                 }
             }
             & $visual.WriteRunSummary -State $State -RecentLines $recentLines -Name 'gitmerge'
+            if (Get-Command Write-GitMergeToolsUpgradeAdvisory -ErrorAction SilentlyContinue) {
+                Write-GitMergeToolsUpgradeAdvisory -Visual $visual
+            }
             return
         }
 

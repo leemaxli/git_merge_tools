@@ -387,6 +387,59 @@ function Get-GitMergeToolsCapabilityProfile {
     }
 }
 
+function Get-GitMergeToolsUpgradeAdvisoryLines {
+    # Pure: returns the advisory lines (string[]) when the achieved visual tier is below an
+    # explicitly-requested tier. Empty when suppressed, when the request was 'auto', or when met.
+    [CmdletBinding()]
+    param([string]$AchievedTier, [string]$RequestedMode, $Capability, [bool]$Suppressed)
+
+    if ($Suppressed) { return @() }
+    if ([string]::IsNullOrWhiteSpace($RequestedMode) -or $RequestedMode -eq 'auto') { return @() }
+    $rank = @{ 'basic' = 0; 'standard' = 1; 'rich' = 2; 'max' = 3 }
+    if (-not $rank.ContainsKey($AchievedTier) -or -not $rank.ContainsKey($RequestedMode)) { return @() }
+    if ($rank[$AchievedTier] -ge $rank[$RequestedMode]) { return @() }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("Visual tier: running '$AchievedTier', but '$RequestedMode' was requested. To reach '$RequestedMode':")
+    if ($null -ne $Capability) {
+        if ($RequestedMode -eq 'max') {
+            if ($Capability.ColorLevel -lt 3) { $lines.Add('  - enable truecolor (use Windows Terminal, or set COLORTERM=truecolor)') }
+            if (-not $Capability.HasVT) { $lines.Add('  - enable virtual-terminal (VT) processing') }
+            if (-not $Capability.UnicodeOk) { $lines.Add('  - use UTF-8 console output') }
+            if ($Capability.IsRedirected) { $lines.Add('  - run in a live terminal (output is currently redirected/captured)') }
+            if ($Capability.IsCI) { $lines.Add('  - max is disabled under CI') }
+            if ($Capability.NoColor) { $lines.Add('  - unset NO_COLOR') }
+        }
+        elseif ($RequestedMode -eq 'rich') {
+            if (-not $Capability.UnicodeOk) { $lines.Add('  - use UTF-8 console output') }
+            if ($Capability.IsRedirected) { $lines.Add('  - run in a live terminal (output is currently redirected/captured)') }
+            if ($Capability.NoColor) { $lines.Add('  - unset NO_COLOR') }
+        }
+        elseif ($RequestedMode -eq 'standard') {
+            if (-not $Capability.UnicodeOk) { $lines.Add('  - use UTF-8 console output') }
+        }
+    }
+    $lines.Add('  (set $env:GITMERGE_TOOLS_SUPPRESS_WARNING=1 to hide this)')
+    return $lines.ToArray()
+}
+
+function Write-GitMergeToolsUpgradeAdvisory {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSAvoidUsingWriteHost', '', Justification = 'Interactive end-of-run advisory.'
+    )]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Visual)
+
+    if ($null -eq $Visual) { return }
+    $capability = Get-GitMergeToolsCapabilityProfile
+    $lines = Get-GitMergeToolsUpgradeAdvisoryLines `
+        -AchievedTier $Visual.VisualLevel `
+        -RequestedMode $Visual.RequestedVisualMode `
+        -Capability $capability `
+        -Suppressed $Visual.VisualWarningSuppressed
+    foreach ($line in @($lines)) { Write-Host $line -ForegroundColor Yellow }
+}
+
 function Test-GitMergeToolsMaxAvailable {
     # Pure gate for the top 'max' tier (raw-ANSI/OSC effects). Param is $Capability (NOT $Profile,
     # which would collide with the automatic $PROFILE variable — the defect-#1 class of bug).
@@ -492,5 +545,7 @@ Export-ModuleMember -Function @(
     'Write-GitMergeToolsRecommendationSummary',
     'Resolve-GitMergeToolsColorLevel',
     'Get-GitMergeToolsCapabilityProfile',
-    'Test-GitMergeToolsMaxAvailable'
+    'Test-GitMergeToolsMaxAvailable',
+    'Get-GitMergeToolsUpgradeAdvisoryLines',
+    'Write-GitMergeToolsUpgradeAdvisory'
 )
