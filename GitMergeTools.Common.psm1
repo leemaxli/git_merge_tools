@@ -45,6 +45,7 @@ function ConvertTo-GitMergeToolsVisualMode {
 
     if ([string]::IsNullOrWhiteSpace($Value)) { return 'auto' }
     switch ($Value.Trim().ToLowerInvariant()) {
+        'max' { 'max'; break }
         'a' { 'rich'; break }
         'rich' { 'rich'; break }
         'full' { 'rich'; break }
@@ -261,7 +262,8 @@ function Get-GitMergeToolsVisualCandidates {
         'basic' { return @('basic') }
         'standard' { return @('standard', 'basic') }
         'rich' { return @('rich', 'standard', 'basic') }
-        default { return @('rich', 'standard', 'basic') }
+        'max' { return @('max', 'rich', 'standard', 'basic') }
+        default { return @('max', 'rich', 'standard', 'basic') }
     }
 }
 
@@ -385,6 +387,21 @@ function Get-GitMergeToolsCapabilityProfile {
     }
 }
 
+function Test-GitMergeToolsMaxAvailable {
+    # Pure gate for the top 'max' tier (raw-ANSI/OSC effects). Param is $Capability (NOT $Profile,
+    # which would collide with the automatic $PROFILE variable — the defect-#1 class of bug).
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Capability)
+    return (
+        $Capability.ColorLevel -eq 3 -and
+        $Capability.HasVT -and
+        $Capability.UnicodeOk -and
+        -not $Capability.IsRedirected -and
+        -not $Capability.IsCI -and
+        -not $Capability.NoColor
+    )
+}
+
 function New-GitMergeToolsVisual {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSUseShouldProcessForStateChangingFunctions',
@@ -405,6 +422,7 @@ function New-GitMergeToolsVisual {
     $runtime = Get-GitMergeToolsRuntimeState
     $requestedMode = ConvertTo-GitMergeToolsVisualMode $env:GITMERGE_VISUAL_MODE
     $richState = Test-GitMergeToolsRichVisualEnvironment -RuntimeState $runtime
+    $capability = Get-GitMergeToolsCapabilityProfile
     $fallbackReasons = [System.Collections.Generic.List[string]]::new()
     $selectedMode = $null
     $selectedModule = $null
@@ -412,13 +430,18 @@ function New-GitMergeToolsVisual {
     foreach ($candidate in Get-GitMergeToolsVisualCandidates -RequestedMode $requestedMode) {
         $moduleName = "GitMergeTools.Visual.$($candidate.Substring(0, 1).ToUpperInvariant())$($candidate.Substring(1)).psm1"
         $explicit = $null
-        if ($candidate -eq 'rich') { $explicit = $env:GITMERGE_TOOLS_VISUAL_RICH_MODULE }
+        if ($candidate -eq 'max') { $explicit = $env:GITMERGE_TOOLS_VISUAL_MAX_MODULE }
+        elseif ($candidate -eq 'rich') { $explicit = $env:GITMERGE_TOOLS_VISUAL_RICH_MODULE }
         elseif ($candidate -eq 'standard') { $explicit = $env:GITMERGE_TOOLS_VISUAL_STANDARD_MODULE }
         elseif ($candidate -eq 'basic') { $explicit = $env:GITMERGE_TOOLS_VISUAL_BASIC_MODULE }
 
         $modulePath = Resolve-GitMergeToolsModule -ModuleName $moduleName -ExplicitPath $explicit -ScriptRoot $ScriptRoot -PSCommandPath $ToolPSCommandPath
         if ([string]::IsNullOrWhiteSpace($modulePath)) {
             $fallbackReasons.Add("$moduleName was not found.")
+            continue
+        }
+        if ($candidate -eq 'max' -and -not (Test-GitMergeToolsMaxAvailable -Capability $capability)) {
+            $fallbackReasons.Add('Max tier requires truecolor + VT + UTF-8 output, non-redirected, non-CI, no NO_COLOR.')
             continue
         }
         if ($candidate -eq 'rich' -and -not $richState.IsAvailable) {
@@ -468,5 +491,6 @@ Export-ModuleMember -Function @(
     'Resolve-GitMergeToolsModule',
     'Write-GitMergeToolsRecommendationSummary',
     'Resolve-GitMergeToolsColorLevel',
-    'Get-GitMergeToolsCapabilityProfile'
+    'Get-GitMergeToolsCapabilityProfile',
+    'Test-GitMergeToolsMaxAvailable'
 )
