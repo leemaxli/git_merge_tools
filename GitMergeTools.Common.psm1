@@ -201,10 +201,8 @@ function Get-GitMergeToolsRuntimeState {
     $isPwsh7 = ($PSVersionTable.PSEdition -eq 'Core' -and $PSVersionTable.PSVersion.Major -ge 7)
     $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
     $windowsPowerShell = Get-Command powershell.exe -ErrorAction SilentlyContinue
-    $runtimeLevel = if ($isPwsh7) { 'powershell7' } elseif ($PSVersionTable.PSEdition -eq 'Desktop') { 'powershell51' } else { 'unknown' }
 
     [pscustomobject]@{
-        RuntimeLevel          = $runtimeLevel
         IsPowerShell7         = $isPwsh7
         PowerShellVersion     = $PSVersionTable.PSVersion.ToString()
         PowerShellEdition     = $PSVersionTable.PSEdition

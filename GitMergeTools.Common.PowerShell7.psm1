@@ -18,7 +18,6 @@ function Get-GitMergeToolsPowerShell7RuntimeState {
     param()
 
     [pscustomobject]@{
-        RuntimeLevel          = 'powershell7'
         IsPowerShell7         = $true
         PowerShellVersion     = $PSVersionTable.PSVersion.ToString()
         PowerShellEdition     = $PSVersionTable.PSEdition

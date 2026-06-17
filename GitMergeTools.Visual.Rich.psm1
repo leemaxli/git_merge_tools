@@ -48,9 +48,6 @@ function New-GitMergeToolsVisualRich {
     $getCommandDescription = (Get-Command Get-GitMergeToolsCommandDescription -ErrorAction Stop).ScriptBlock
     $getMarkerColor = (Get-Command Get-GitMergeToolsMarkerColor -ErrorAction Stop).ScriptBlock
     $formatFixedWidth = (Get-Command Format-GitMergeToolsFixedWidth -ErrorAction Stop).ScriptBlock
-    $icons = @{
-        Git = '🔀'; Branch = '🌿'; Merge = '🔀'; Check = '✅'; Cross = '❌'; Sync = '🔄'; Rocket = '🚀'; Trash = '🧹'; Search = '🔍'; Cloud = '☁️'; Beaker = '🧪'; Status = '📊'
-    }
 
     $resolveStageIcon = {
         param([string]$Icon)
@@ -185,7 +182,7 @@ function New-GitMergeToolsVisualRich {
         if ($State.Result -eq 'SUCCESS') { Write-Host "$Name finished." -ForegroundColor $theme.Success } elseif ($State.Result -eq 'SIMULATED') { Write-Host "$Name dry-run finished; no changes were made." -ForegroundColor ([ConsoleColor]::Magenta) } else { Write-Host "$Name stopped before full completion." -ForegroundColor $theme.Error }
     }
 
-    New-GitMergeToolsVisualObject -Context $context -Icons $icons -WriteRunBanner ($writeRunBanner.GetNewClosure()) -WriteStage ($writeStage.GetNewClosure()) -WriteStatusLine ($writeStatusLine.GetNewClosure()) -WriteMiniProgress ($writeMiniProgress.GetNewClosure()) -WriteBranchTree ($writeBranchTree.GetNewClosure()) -WriteSuccessBanner ($writeSuccessBanner.GetNewClosure()) -WriteRunSummary ($writeRunSummary.GetNewClosure())
+    New-GitMergeToolsVisualObject -Context $context -WriteRunBanner ($writeRunBanner.GetNewClosure()) -WriteStage ($writeStage.GetNewClosure()) -WriteStatusLine ($writeStatusLine.GetNewClosure()) -WriteMiniProgress ($writeMiniProgress.GetNewClosure()) -WriteBranchTree ($writeBranchTree.GetNewClosure()) -WriteSuccessBanner ($writeSuccessBanner.GetNewClosure()) -WriteRunSummary ($writeRunSummary.GetNewClosure())
 }
 
 Export-ModuleMember -Function New-GitMergeToolsVisualRich

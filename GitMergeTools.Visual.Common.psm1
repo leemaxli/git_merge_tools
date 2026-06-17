@@ -145,7 +145,6 @@ function New-GitMergeToolsVisualObject {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Context,
-        [Parameter(Mandatory)][hashtable]$Icons,
         [Parameter(Mandatory)][scriptblock]$WriteRunBanner,
         [Parameter(Mandatory)][scriptblock]$WriteStage,
         [Parameter(Mandatory)][scriptblock]$WriteStatusLine,
@@ -162,7 +161,6 @@ function New-GitMergeToolsVisualObject {
         RichUnavailableReasons = [string[]]@($Context.RichUnavailableReasons)
         VisualWarningSuppressed = $Context.VisualWarningSuppressed
         Theme = $Context.Theme
-        Icons = $Icons
         WriteRunBanner = $WriteRunBanner
         WriteStage = $WriteStage
         WriteStatusLine = $WriteStatusLine
