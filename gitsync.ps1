@@ -3,11 +3,12 @@
     Transactionally consolidates local branches through main, then pushes the
     updated main and synchronized branches to origin.
 .DESCRIPTION
-    gitsync reuses gitmerge for the local merge/synchronization phase. Before
-    local refs are changed, it verifies that origin exists and that remote
-    target branches do not contain commits missing from their local branches.
-    After gitmerge succeeds, it pushes main and the selected target branches
-    with a single atomic ordinary push.
+    gitsync runs the shared transactional consolidation engine for the local
+    merge/synchronization phase (the same engine gitmerge uses) — no separate
+    gitmerge call. Before local refs are changed, it verifies that origin exists
+    and that remote target branches do not contain commits missing from their
+    local branches. After consolidation succeeds, it pushes main and the selected
+    target branches with a single atomic ordinary push.
 .PARAMETER BranchName
     Empty selects the current branch. all or cross-all selects every local
     branch, including main/master.
@@ -27,19 +28,20 @@ function gitsync {
         [string]$BranchName = ''
     )
 
-    # Load the shared git primitives (Core). Resolution: this script's folder -> its command path's
-    # folder -> $env:GITMERGE_TOOLS_HOME. Core is mandatory; without it the command cannot run safely.
-    $gmtCoreModule = $null
+    # Load the shared modules: Core (git primitives) and Merge (the transactional engine — gitsync now
+    # runs the same engine directly instead of calling gitmerge). Resolution: this script's folder ->
+    # its command path's folder -> $env:GITMERGE_TOOLS_HOME. Both are mandatory.
+    $gmtModuleDir = $null
     foreach ($gmtDir in @($PSScriptRoot, (Split-Path -Parent $PSCommandPath), $env:GITMERGE_TOOLS_HOME)) {
         if ([string]::IsNullOrWhiteSpace($gmtDir)) { continue }
-        $gmtCandidate = Join-Path $gmtDir 'GitMergeTools.Core.psm1'
-        if (Test-Path -LiteralPath $gmtCandidate) { $gmtCoreModule = $gmtCandidate; break }
+        if (Test-Path -LiteralPath (Join-Path $gmtDir 'GitMergeTools.Core.psm1')) { $gmtModuleDir = $gmtDir; break }
     }
-    if (-not $gmtCoreModule) {
+    if (-not $gmtModuleDir) {
         Write-Warning 'GitMergeTools.Core.psm1 was not found beside this command (set $env:GITMERGE_TOOLS_HOME to its folder).'
         return $false
     }
-    Import-Module $gmtCoreModule -ErrorAction Stop
+    Import-Module (Join-Path $gmtModuleDir 'GitMergeTools.Core.psm1') -ErrorAction Stop
+    Import-Module (Join-Path $gmtModuleDir 'GitMergeTools.Merge.psm1') -ErrorAction Stop
 
     function Test-GitMergeToolsSuppressWarningLocal {
         $truthy = @('1', 'true', 'TRUE', 'yes', 'YES', 'on', 'ON')
@@ -150,51 +152,6 @@ function gitsync {
         Write-Host ("   {0,-3} {1}" -f $Marker, $Message) -ForegroundColor $Color
     }
 
-    function Resolve-GitMergeFunction {
-        if (Get-Command gitmerge -CommandType Function -ErrorAction SilentlyContinue) {
-            return $true
-        }
-
-        $basePath = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { Split-Path -Parent $PSCommandPath } else { $PSScriptRoot }
-        $scriptPath = $null
-        $isWindowsRuntime = ($PSVersionTable.PSEdition -eq 'Desktop' -or $PSVersionTable.Platform -eq 'Win32NT' -or $IsWindows)
-        $xdgPowerShell = if (-not [string]::IsNullOrWhiteSpace($env:XDG_CONFIG_HOME)) { Join-Path $env:XDG_CONFIG_HOME 'powershell' } else { $null }
-        $homeConfigPowerShell = if (-not [string]::IsNullOrWhiteSpace($HOME)) { Join-Path (Join-Path $HOME '.config') 'powershell' } else { $null }
-        $homeDocumentsPowerShell = if (-not [string]::IsNullOrWhiteSpace($HOME)) { Join-Path (Join-Path $HOME 'Documents') 'PowerShell' } else { $null }
-        $windowsDocumentsPowerShell = if ($isWindowsRuntime) { Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell' } else { $null }
-        $windowsOneDrivePowerShell = if ($isWindowsRuntime -and -not [string]::IsNullOrWhiteSpace($HOME)) { Join-Path (Join-Path (Join-Path $HOME 'OneDrive') 'Documents') 'PowerShell' } else { $null }
-        $commonCandidates = @(
-            $env:GITMERGE_TOOLS_COMMON_MODULE,
-            (Join-Path $basePath 'GitMergeTools.Common.psm1'),
-            $(if ($xdgPowerShell) { Join-Path $xdgPowerShell 'GitMergeTools.Common.psm1' }),
-            $(if ($homeConfigPowerShell) { Join-Path $homeConfigPowerShell 'GitMergeTools.Common.psm1' }),
-            $(if ($homeDocumentsPowerShell) { Join-Path $homeDocumentsPowerShell 'GitMergeTools.Common.psm1' }),
-            $(if ($windowsDocumentsPowerShell) { Join-Path $windowsDocumentsPowerShell 'GitMergeTools.Common.psm1' }),
-            $(if ($windowsOneDrivePowerShell) { Join-Path $windowsOneDrivePowerShell 'GitMergeTools.Common.psm1' })
-        )
-        foreach ($candidate in $commonCandidates) {
-            if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate)) {
-                try {
-                    Import-Module $candidate -Force -ErrorAction Stop
-                    $scriptPath = Resolve-GitMergeToolsScript -ScriptName 'gitmerge.ps1' -ExplicitPath $env:GITMERGE_SCRIPT -ScriptRoot $PSScriptRoot -PSCommandPath $PSCommandPath
-                    break
-                }
-                catch {
-                    $suppress = (Test-GitMergeToolsSuppressWarningLocal)
-                    if (-not $suppress) {
-                        Write-Warning "GitMergeTools.Common.psm1 could not resolve gitmerge.ps1. $($_.Exception.Message)"
-                    }
-                }
-            }
-        }
-        if ([string]::IsNullOrWhiteSpace($scriptPath)) {
-            $scriptPath = Join-Path $basePath 'gitmerge.ps1'
-        }
-        if (Test-Path -LiteralPath $scriptPath) {
-            . $scriptPath
-        }
-        return ($null -ne (Get-Command gitmerge -CommandType Function -ErrorAction SilentlyContinue))
-    }
     function Write-SyncSummary {
         param(
             [string]$Result,
@@ -246,11 +203,6 @@ function gitsync {
     try {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         $failureReason = 'Git is not installed or is not available on PATH.'
-        Write-Warning $failureReason
-        return $false
-    }
-    if (-not (Resolve-GitMergeFunction)) {
-        $failureReason = 'Cannot find gitmerge. Put gitmerge.ps1 beside gitsync.ps1 or load gitmerge first.'
         Write-Warning $failureReason
         return $false
     }
@@ -365,7 +317,7 @@ function gitsync {
 
     if ($mode -eq 'debug') {
         Write-StatusLine -Marker '◇' -Message 'Would fetch origin and verify remote branch ancestry before any local merge.' -Color Magenta
-        Write-StatusLine -Marker '◇' -Message $(if ($skipLocalMerge) { "Would skip local merge because '$mainBranch' was selected directly." } else { 'Would run gitmerge for the selected local merge scope.' }) -Color Magenta
+        Write-StatusLine -Marker '◇' -Message $(if ($skipLocalMerge) { "Would skip local merge because '$mainBranch' was selected directly." } else { 'Would run the shared consolidation engine for the selected local merge scope.' }) -Color Magenta
         Write-Stage -Title 'PUSH REMOTE' -Subtitle '[DRY-RUN] Would push main and synchronized branches to origin' -StageIcon 'PUSH' -Color Magenta
         Write-StatusLine -Marker '◇' -Message "Would push: $($pushBranches -join ', ')" -Color Magenta
         $syncResult = 'SIMULATED'
@@ -406,15 +358,23 @@ function gitsync {
         Write-StatusLine -Marker '✓' -Message "Selected '$mainBranch'; no local merge phase is required before push." -Color Green
     }
     else {
-        $mergeResult = if ([string]::IsNullOrEmpty($BranchName)) {
-            gitmerge
+        # Run the SAME transactional engine gitmerge uses (no separate gitmerge function/process call);
+        # it renders progress through gitsync's $visual and reports via $mergeState. Push happens below.
+        $mergeState = [pscustomobject]@{
+            DryRun = $false; Mode = (Get-Mode $BranchName); Result = 'FAILED'; Repository = ''
+            MainBranch = ''; WorktreeCount = 0; LocalBranchCount = 0
+            TargetBranches = [System.Collections.Generic.List[string]]::new()
+            IntegratedBranches = [System.Collections.Generic.List[string]]::new()
+            SynchronizedBranches = [System.Collections.Generic.List[string]]::new()
+            FailedBranches = [System.Collections.Generic.List[string]]::new()
+            SkippedBranches = [System.Collections.Generic.List[string]]::new()
+            ConflictBranch = ''; MainPublished = 'NO'; CleanupStatus = 'NOT REQUIRED'
+            FailureReason = ''; Elapsed = [timespan]::Zero; SummaryEnabled = $false
         }
-        else {
-            gitmerge $BranchName
-        }
-        $mergeOk = [bool](@($mergeResult | Where-Object { $_ -is [bool] }) | Select-Object -Last 1)
+        $mergeOk = [bool](@(Invoke-GitMergeConsolidation -BranchName $BranchName -RunState $mergeState -Visual $visual) |
+            Where-Object { $_ -is [bool] } | Select-Object -Last 1)
         if (-not $mergeOk) {
-            $failureReason = 'Local gitmerge phase failed; nothing was pushed.'
+            $failureReason = if ([string]::IsNullOrWhiteSpace($mergeState.FailureReason)) { 'Local consolidation phase failed; nothing was pushed.' } else { $mergeState.FailureReason }
             Write-Warning $failureReason
             return $false
         }
