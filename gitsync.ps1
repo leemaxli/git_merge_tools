@@ -27,80 +27,19 @@ function gitsync {
         [string]$BranchName = ''
     )
 
-    function Invoke-GitCommand {
-        param(
-            [AllowEmptyString()]
-            [string]$WorkingDirectory,
-
-            [Parameter(Mandatory)]
-            [string[]]$Arguments,
-
-            [switch]$MergeError,
-
-            [switch]$SuppressError
-        )
-
-        $previousPreference = $ErrorActionPreference
-        $previousOutputEncoding = [Console]::OutputEncoding
-        $ErrorActionPreference = 'Continue'
-        try {
-            # Decode git stdout as UTF-8 regardless of the console code page (cp936/OEM on a redirected
-            # or 5.1 stdout) so non-ASCII branch names round-trip byte-exact (#1); restored in finally.
-            [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-            if ([string]::IsNullOrEmpty($WorkingDirectory)) {
-                if ($MergeError) {
-                    $rawOutput = @(& git @Arguments 2>&1)
-                }
-                elseif ($SuppressError) {
-                    $rawOutput = @(& git @Arguments 2>$null)
-                }
-                else {
-                    $rawOutput = @(& git @Arguments)
-                }
-            }
-            else {
-                if ($MergeError) {
-                    $rawOutput = @(& git -C $WorkingDirectory @Arguments 2>&1)
-                }
-                elseif ($SuppressError) {
-                    $rawOutput = @(& git -C $WorkingDirectory @Arguments 2>$null)
-                }
-                else {
-                    $rawOutput = @(& git -C $WorkingDirectory @Arguments)
-                }
-            }
-            $exitCode = $LASTEXITCODE
-        }
-        finally {
-            $ErrorActionPreference = $previousPreference
-            [Console]::OutputEncoding = $previousOutputEncoding
-        }
-
-        return [pscustomobject]@{
-            ExitCode = $exitCode
-            Output   = [string[]]@($rawOutput | ForEach-Object { $_.ToString() })
-        }
+    # Load the shared git primitives (Core). Resolution: this script's folder -> its command path's
+    # folder -> $env:GITMERGE_TOOLS_HOME. Core is mandatory; without it the command cannot run safely.
+    $gmtCoreModule = $null
+    foreach ($gmtDir in @($PSScriptRoot, (Split-Path -Parent $PSCommandPath), $env:GITMERGE_TOOLS_HOME)) {
+        if ([string]::IsNullOrWhiteSpace($gmtDir)) { continue }
+        $gmtCandidate = Join-Path $gmtDir 'GitMergeTools.Core.psm1'
+        if (Test-Path -LiteralPath $gmtCandidate) { $gmtCoreModule = $gmtCandidate; break }
     }
-
-    function Get-FirstOutputLine {
-        param([Parameter(Mandatory)]$Result)
-        $lines = @($Result.Output)
-        if ($lines.Count -eq 0) { return $null }
-        return $lines[0].Trim()
+    if (-not $gmtCoreModule) {
+        Write-Warning 'GitMergeTools.Core.psm1 was not found beside this command (set $env:GITMERGE_TOOLS_HOME to its folder).'
+        return $false
     }
-
-    function Write-GitFailure {
-        param(
-            [Parameter(Mandatory)][string]$Context,
-            [Parameter(Mandatory)]$Result
-        )
-        Write-Warning "$Context (git exit $($Result.ExitCode))"
-        foreach ($line in @($Result.Output)) {
-            if (-not [string]::IsNullOrWhiteSpace($line)) {
-                Write-Host "  $line" -ForegroundColor DarkGray
-            }
-        }
-    }
+    Import-Module $gmtCoreModule -ErrorAction Stop
 
     function Test-GitMergeToolsSuppressWarningLocal {
         $truthy = @('1', 'true', 'TRUE', 'yes', 'YES', 'on', 'ON')
@@ -211,63 +150,6 @@ function gitsync {
         Write-Host ("   {0,-3} {1}" -f $Marker, $Message) -ForegroundColor $Color
     }
 
-    function Test-LocalBranch {
-        param([string]$Repository, [string]$Name)
-        $result = Invoke-GitCommand $Repository @(
-            'show-ref', '--verify', '--quiet', "refs/heads/$Name"
-        ) -SuppressError
-        return ($result.ExitCode -eq 0)
-    }
-
-    function Get-CurrentBranch {
-        param([string]$Repository)
-        $result = Invoke-GitCommand $Repository @(
-            'symbolic-ref', '--quiet', '--short', 'HEAD'
-        ) -SuppressError
-        if ($result.ExitCode -ne 0) { return $null }
-        return Get-FirstOutputLine $result
-    }
-
-    function Get-LocalBranch {
-        param([string]$Repository)
-        $result = Invoke-GitCommand $Repository @(
-            'for-each-ref', '--format=%(refname:short)', 'refs/heads/'
-        )
-        if ($result.ExitCode -ne 0) {
-            Write-GitFailure 'Cannot enumerate local branches' $result
-            return $null
-        }
-        return @($result.Output | Where-Object {
-                -not [string]::IsNullOrWhiteSpace($_)
-            } | Sort-Object -Unique)
-    }
-
-    function Get-RefHash {
-        param([string]$Repository, [string]$Ref)
-        $result = Invoke-GitCommand $Repository @('rev-parse', '--verify', $Ref) -SuppressError
-        if ($result.ExitCode -ne 0) { return $null }
-        return Get-FirstOutputLine $result
-    }
-
-    function Test-Ancestor {
-        param([string]$Repository, [string]$Ancestor, [string]$Descendant)
-        $result = Invoke-GitCommand $Repository @(
-            'merge-base', '--is-ancestor', $Ancestor, $Descendant
-        ) -SuppressError
-        return ($result.ExitCode -eq 0)
-    }
-
-    function Get-Mode {
-        param([string]$Name)
-        switch ($Name) {
-            { [string]::IsNullOrWhiteSpace($_) } { 'current'; break }
-            'all' { 'all'; break }
-            'cross-all' { 'all'; break }
-            'debug' { 'debug'; break }
-            default { 'single' }
-        }
-    }
-
     function Resolve-GitMergeFunction {
         if (Get-Command gitmerge -CommandType Function -ErrorAction SilentlyContinue) {
             return $true
@@ -313,18 +195,6 @@ function gitsync {
         }
         return ($null -ne (Get-Command gitmerge -CommandType Function -ErrorAction SilentlyContinue))
     }
-    function Get-UniqueBranchList {
-        param([string[]]$Branches)
-        $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-        $result = [System.Collections.Generic.List[string]]::new()
-        foreach ($branch in $Branches) {
-            if (-not [string]::IsNullOrWhiteSpace($branch) -and $set.Add($branch)) {
-                $result.Add($branch)
-            }
-        }
-        return $result.ToArray()
-    }
-
     function Write-SyncSummary {
         param(
             [string]$Result,
