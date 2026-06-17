@@ -29,68 +29,20 @@ function gitmerge {
         [string]$BranchName = ''
     )
 
-    function Invoke-GitCommand {
-        param(
-            [AllowEmptyString()]
-            [string]$WorkingDirectory,
-
-            [Parameter(Mandatory)]
-            [string[]]$Arguments,
-
-            [switch]$MergeError,
-
-            [switch]$SuppressError
-        )
-
-        $previousPreference = $ErrorActionPreference
-        $previousOutputEncoding = [Console]::OutputEncoding
-        $ErrorActionPreference = 'Continue'
-        try {
-            # Decode git stdout as UTF-8 regardless of the console code page (cp936/OEM on a redirected
-            # or 5.1 stdout) so non-ASCII branch names round-trip byte-exact (#1); restored in finally.
-            [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-            if ([string]::IsNullOrEmpty($WorkingDirectory)) {
-                if ($MergeError) {
-                    $rawOutput = @(& git @Arguments 2>&1)
-                }
-                elseif ($SuppressError) {
-                    $rawOutput = @(& git @Arguments 2>$null)
-                }
-                else {
-                    $rawOutput = @(& git @Arguments)
-                }
-            }
-            else {
-                if ($MergeError) {
-                    $rawOutput = @(& git -C $WorkingDirectory @Arguments 2>&1)
-                }
-                elseif ($SuppressError) {
-                    $rawOutput = @(& git -C $WorkingDirectory @Arguments 2>$null)
-                }
-                else {
-                    $rawOutput = @(& git -C $WorkingDirectory @Arguments)
-                }
-            }
-            $exitCode = $LASTEXITCODE
-        }
-        finally {
-            $ErrorActionPreference = $previousPreference
-            [Console]::OutputEncoding = $previousOutputEncoding
-        }
-
-        $output = @($rawOutput | ForEach-Object { $_.ToString() })
-        return [pscustomobject]@{
-            ExitCode = $exitCode
-            Output   = [string[]]$output
-        }
+    # Load the shared git primitives (Core): one Invoke-GitCommand + ref/branch/worktree helpers,
+    # Get-Mode, Get-UniqueBranchList, etc. Resolution: this script's folder -> its command path's
+    # folder -> $env:GITMERGE_TOOLS_HOME. Core is mandatory; without it the command cannot run safely.
+    $gmtCoreModule = $null
+    foreach ($gmtDir in @($PSScriptRoot, (Split-Path -Parent $PSCommandPath), $env:GITMERGE_TOOLS_HOME)) {
+        if ([string]::IsNullOrWhiteSpace($gmtDir)) { continue }
+        $gmtCandidate = Join-Path $gmtDir 'GitMergeTools.Core.psm1'
+        if (Test-Path -LiteralPath $gmtCandidate) { $gmtCoreModule = $gmtCandidate; break }
     }
-
-    function Get-FirstOutputLine {
-        param([Parameter(Mandatory)]$Result)
-        $lines = @($Result.Output)
-        if ($lines.Count -eq 0) { return $null }
-        return $lines[0].Trim()
+    if (-not $gmtCoreModule) {
+        Write-Warning 'GitMergeTools.Core.psm1 was not found beside this command (set $env:GITMERGE_TOOLS_HOME to its folder).'
+        return $false
     }
+    Import-Module $gmtCoreModule -ErrorAction Stop
 
     function Test-GitMergeToolsSuppressWarningLocal {
         $truthy = @('1', 'true', 'TRUE', 'yes', 'YES', 'on', 'ON')
@@ -149,19 +101,6 @@ function gitmerge {
     }
 
     $visual = New-OptionalGitMergeVisual
-
-    function Write-GitFailure {
-        param(
-            [Parameter(Mandatory)][string]$Context,
-            [Parameter(Mandatory)]$Result
-        )
-        Write-Warning "$Context (git exit $($Result.ExitCode))"
-        foreach ($line in @($Result.Output)) {
-            if (-not [string]::IsNullOrWhiteSpace($line)) {
-                Write-Host "  $line" -ForegroundColor DarkGray
-            }
-        }
-    }
 
     function Write-RunBanner {
         param([bool]$DryRun)
@@ -342,93 +281,6 @@ function gitmerge {
         }
     }
 
-    function Test-LocalBranch {
-        param([string]$Repository, [string]$Name)
-        $result = Invoke-GitCommand $Repository @(
-            'show-ref', '--verify', '--quiet', "refs/heads/$Name"
-        ) -SuppressError
-        return ($result.ExitCode -eq 0)
-    }
-
-    function Get-CurrentBranch {
-        param([string]$Repository)
-        $result = Invoke-GitCommand $Repository @(
-            'symbolic-ref', '--quiet', '--short', 'HEAD'
-        ) -SuppressError
-        if ($result.ExitCode -ne 0) { return $null }
-        return Get-FirstOutputLine $result
-    }
-
-    function Get-LocalBranch {
-        param([string]$Repository)
-        $result = Invoke-GitCommand $Repository @(
-            'for-each-ref', '--format=%(refname:short)', 'refs/heads/'
-        )
-        if ($result.ExitCode -ne 0) {
-            Write-GitFailure 'Cannot enumerate local branches' $result
-            return $null
-        }
-        return @($result.Output | Where-Object {
-                -not [string]::IsNullOrWhiteSpace($_)
-            } | Sort-Object -Unique)
-    }
-
-    function Get-WorktreeRecord {
-        param([string]$Repository)
-        $result = Invoke-GitCommand $Repository @('worktree', 'list', '--porcelain')
-        if ($result.ExitCode -ne 0) {
-            Write-GitFailure 'Cannot enumerate worktrees' $result
-            return $null
-        }
-
-        $records = [System.Collections.Generic.List[object]]::new()
-        $current = $null
-        foreach ($line in @($result.Output) + '') {
-            if ([string]::IsNullOrEmpty($line)) {
-                if ($null -ne $current) {
-                    $records.Add([pscustomobject]$current)
-                    $current = $null
-                }
-                continue
-            }
-
-            if ($line.StartsWith('worktree ', [System.StringComparison]::Ordinal)) {
-                $current = @{
-                    Path     = $line.Substring(9)
-                    Branch   = $null
-                    Detached = $false
-                    Locked   = $false
-                    LockReason = ''
-                    Prunable = $false
-                }
-                continue
-            }
-
-            if ($null -eq $current) { continue }
-            if ($line.StartsWith('branch refs/heads/', [System.StringComparison]::Ordinal)) {
-                $current.Branch = $line.Substring(18)
-            }
-            elseif ($line -eq 'detached') {
-                $current.Detached = $true
-            }
-            elseif ($line.StartsWith('locked', [System.StringComparison]::Ordinal)) {
-                $current.Locked = $true
-                if ($line.Length -gt 7) {
-                    $current.LockReason = $line.Substring(7)
-                }
-            }
-            elseif ($line.StartsWith('prunable', [System.StringComparison]::Ordinal)) {
-                $current.Prunable = $true
-            }
-        }
-        return $records.ToArray()
-    }
-
-    function Find-BranchWorktree {
-        param([object[]]$Worktrees, [string]$Branch)
-        return @($Worktrees | Where-Object { $_.Branch -ceq $Branch }) | Select-Object -First 1
-    }
-
     function Test-CleanWorktree {
         param([Parameter(Mandatory)]$Worktree)
         if ($Worktree.Locked) {
@@ -453,21 +305,6 @@ function gitmerge {
             return $false
         }
         return $true
-    }
-
-    function Get-RefHash {
-        param([string]$Repository, [string]$Ref)
-        $result = Invoke-GitCommand $Repository @('rev-parse', '--verify', $Ref) -SuppressError
-        if ($result.ExitCode -ne 0) { return $null }
-        return Get-FirstOutputLine $result
-    }
-
-    function Test-Ancestor {
-        param([string]$Repository, [string]$Ancestor, [string]$Descendant)
-        $result = Invoke-GitCommand $Repository @(
-            'merge-base', '--is-ancestor', $Ancestor, $Descendant
-        ) -SuppressError
-        return ($result.ExitCode -eq 0)
     }
 
     function Test-TemporaryWorktreeForCleanup {
@@ -649,13 +486,7 @@ function gitmerge {
         return $true
     }
 
-    $mode = switch ($BranchName) {
-        { [string]::IsNullOrWhiteSpace($_) } { 'current'; break }
-        'all' { 'all'; break }
-        'cross-all' { 'all'; break }
-        'debug' { 'debug'; break }
-        default { 'single' }
-    }
+    $mode = Get-Mode $BranchName
 
     $startedAt = Get-Date
     $runState = [pscustomobject]@{
