@@ -1,6 +1,6 @@
 # GitMergeTools
 
-[English](README.md) · **简体中文**
+[🇺🇸 English](README.md) · 🇨🇳 **简体中文**
 
 跨平台 PowerShell 工具,用于**安全、事务式**地在本地把 Git 分支经 main 整合,并带一套按终端能力
 自动降级的视觉层。可运行于 **PowerShell 7+**(优先)与 **Windows PowerShell 5.1**,支持

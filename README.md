@@ -1,6 +1,6 @@
 # GitMergeTools
 
-**English** · [简体中文](README.zh-CN.md)
+🇺🇸 **English** · [🇨🇳 简体中文](README.zh-CN.md)
 
 Cross-platform PowerShell helpers for **safe, transactional** local Git branch consolidation —
 with an auto-degrading, capability-aware visual layer. Runs on **PowerShell 7+** (preferred) and
