@@ -560,7 +560,9 @@ function gitmerge {
         }
 
         Write-Host 'Fetching origin...' -ForegroundColor DarkGray
-        $fetch = Invoke-GitCommand $Repository @('fetch', 'origin', '--prune') -MergeError
+        # Non-destructive fetch: never prune local-only tags/refs as a side effect of a user's
+        # fetch.prune/fetch.pruneTags config (#2's twin; mirrors gitsync's hardened fetch).
+        $fetch = Invoke-GitCommand $Repository @('-c', 'fetch.prune=false', '-c', 'fetch.pruneTags=false', 'fetch', 'origin') -MergeError
         if ($fetch.ExitCode -ne 0) {
             Write-GitFailure 'Fetch from origin failed' $fetch
             return $false
