@@ -587,7 +587,7 @@ function gitmerge {
 
         if ($null -ne $MainWorktree) {
             $advance = Invoke-GitCommand $MainWorktree.Path @(
-                'merge', '--ff-only', "origin/$MainBranch"
+                'merge', '--ff-only', "refs/remotes/origin/$MainBranch"
             ) -MergeError
         }
         else {
@@ -626,7 +626,7 @@ function gitmerge {
         if ($null -ne $branchWorktree) {
             if (-not (Test-CleanWorktree $branchWorktree)) { return $false }
             $advance = Invoke-GitCommand $branchWorktree.Path @(
-                'merge', '--ff-only', $MainBranch
+                'merge', '--ff-only', "refs/heads/$MainBranch"
             ) -MergeError
         }
         else {
@@ -862,7 +862,7 @@ function gitmerge {
             Write-Stage -Title 'TEMPORARY INTEGRATION' -Subtitle 'Merge every target before changing the real main branch' -StageIcon 'MERGE'
             Write-StatusLine -Marker '→' -Message "Creating temporary branch '$temporaryBranch'." -Color Cyan
             $create = Invoke-GitCommand $repository @(
-                'worktree', 'add', '-b', $temporaryBranch, $temporaryWorktree, $mainBranch
+                'worktree', 'add', '-b', $temporaryBranch, $temporaryWorktree, "refs/heads/$mainBranch"
             ) -MergeError
             if ($create.ExitCode -ne 0) {
                 Write-GitFailure 'Cannot create the integration worktree' $create
@@ -877,7 +877,7 @@ function gitmerge {
                 Write-MiniProgress -Current $mergeIndex -Total $targetBranches.Count -Label 'Merging' -Color Yellow
                 Write-Host "── Merge [$branch] → [$mainBranch] (staged) ──" -ForegroundColor Yellow
                 $merge = Invoke-GitCommand $temporaryWorktree @(
-                    'merge', '--no-edit', '-m', "Merge branch '$branch' into $mainBranch", $branch
+                    'merge', '--no-edit', '-m', "Merge branch '$branch' into $mainBranch", "refs/heads/$branch"
                 ) -MergeError
                 if ($merge.ExitCode -ne 0) {
                     Write-GitFailure "Merge conflict or failure in '$branch'" $merge
@@ -918,7 +918,7 @@ function gitmerge {
                     return $false
                 }
                 $publish = Invoke-GitCommand $mainWorktree.Path @(
-                    'merge', '--ff-only', $temporaryBranch
+                    'merge', '--ff-only', "refs/heads/$temporaryBranch"
                 ) -MergeError
             }
             else {
