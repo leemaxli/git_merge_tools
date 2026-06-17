@@ -6,12 +6,12 @@ and Windows PowerShell 5.1); above the line is the remaining backlog.
 ## Backlog
 
 ### P3 — Structural refactor (largest remaining piece)
-- Extract a shared `GitMergeTools.Core.psm1` (single source of truth: one `Invoke-GitCommand`,
-  ref/branch/worktree helpers, `Get-Mode`, `Resolve-MainBranch`). The three commands currently carry
-  drifted copies. **Do this first** — lowest-risk, highest-certainty slice.
-- Extract the transactional merge engine into `GitMergeTools.Merge.psm1`; make the three commands thin
-  peers and **remove the `gitsync → gitmerge` call**. **Gate behind characterization tests** that prove
-  behavior-equivalence on the safety path (CAS / ancestor / clean-worktree / cleanup); land in one piece.
+- ✅ **Done (on main):** shared `GitMergeTools.Core.psm1` — single source of truth for the git primitives
+  (Invoke-GitCommand, ref/branch/worktree helpers, Get-Mode, …); all three commands consume it.
+- ⏳ Extract the transactional merge engine into `GitMergeTools.Merge.psm1`; make the commands thin peers
+  and **remove the `gitsync → gitmerge` call**, gated behind the characterization tests (CAS / ancestor /
+  clean-worktree / cleanup), landed in one piece. *The self-contained engine safety helpers are already
+  extracted; the orchestration body + the gitsync→gitmerge removal are the remaining sub-step.*
 - Fold runtime/visual detection (`Common` + `PowerShell7/51`) into `GitMergeTools.Environment.psm1`.
 - Single-directory module discovery (drop the XDG/Documents/OneDrive ladder). Note: the override var
   changes from `GITMERGE_TOOLS_COMMON_MODULE` (a file) to `GITMERGE_TOOLS_HOME` (a dir) — document it.
@@ -26,6 +26,9 @@ and Windows PowerShell 5.1); above the line is the remaining backlog.
 - Preflight: refuse on in-progress ops (rebase/cherry-pick/revert/bisect — **all** of them, resolved
   per-worktree via `git rev-parse --git-path`); refuse **LFS / submodule / sparse-checkout** (these can
   publish a wrong tree to main). *(shallow/partial clones are allowed — they don't corrupt the tree.)*
+- **MAX_PATH (Windows) fast-fail**: before creating the temp worktree, refuse with a clear, actionable
+  message when the temp base path is already near the 260-char limit (or long paths are disabled), and
+  pass `-c core.longpaths=true` on the tool's own git calls. Path-LENGTH check only — no DriveInfo/disk probe.
 - gitsync: structured result + report-only on push rejection + clean-fail on lock/CAS concurrency;
   a meta-test grepping push args to permanently forbid `--force`.
 - Idempotent startup reclamation of orphaned `gitmerge-tmp-*` worktrees (incl. macOS realpath in the guard).
@@ -38,17 +41,19 @@ and Windows PowerShell 5.1); above the line is the remaining backlog.
 - Per-stage Stopwatch timing badges + a recursive branch-topology tree in the **rich** tier
   (plain-text, capture-safe).
 
-## Descoped — over-engineering, deliberately not building
+### Optional enhancements (nice-to-have, not scheduled)
 - **`max`-tier raw ANSI/OSC effects** (OSC 9;4 taskbar progress, truecolor gradients, rounded panels):
-  zero information gain for a seconds-long local git op, highest output-stream-leak risk. The `max`
-  shell/gate stays (it degrades cleanly to `rich`); its raw-byte content is deferred indefinitely. Until
-  then, the "upgrade to max" advisory should note that `max` currently renders identically to `rich`.
-- **ENOSPC `DriveInfo` predictive precheck** and **MAX_PATH predictive length fast-fail**: fragile
-  (TOCTOU / threshold-guessing). Keep only `-c core.longpaths=true`, let git fail cleanly, and let the
-  startup reclamation sweep the orphan. Classify ENOSPC at runtime only if cheap.
+  optional top-tier polish — real value but low priority. The `max` gate already exists and degrades
+  cleanly to `rich`; until the effects land, the "upgrade to max" advisory should note `max` currently
+  renders identically to `rich`. Build behind a single gated raw-ANSI/OSC sink **plus its leak-test matrix**
+  (redirected/CI/NO_COLOR ⇒ zero ESC/OSC/CR bytes) when desired.
+
+## Descoped — over-engineering, deliberately not building
+- **ENOSPC `DriveInfo` predictive precheck**: fragile (TOCTOU / threshold-guessing) — a whole disk-space
+  probe for a rare case. Let git fail cleanly and let the startup reclamation sweep the orphan; classify
+  ENOSPC at runtime only if cheap. *(MAX_PATH fast-fail is a path-LENGTH check and IS scheduled above.)*
 - **Case-insensitive ref-collision refuse**: requires a user to create twin refs; at most a cheap
   piggyback check inside the preflight loop, not a dedicated gate.
-- **The full `max` leak-test matrix**: deferred together with the raw-byte content it guards.
 
 ---
 
@@ -68,4 +73,4 @@ and Windows PowerShell 5.1); above the line is the remaining backlog.
   advisory (in `gitmerge`); display-width helpers (`Get-GitMergeToolsDisplayWidth` /
   `Format-GitMergeToolsFixedWidth`).
 - **Tests:** dependency-free harness (no Pester), hermetic sandboxed repos + a path-containment guard,
-  smoke/characterization/safety suites, and a cross-runtime driver. **54 passing on both runtimes.**
+  smoke/characterization/safety suites, and a cross-runtime driver. **57 passing on both runtimes.**
