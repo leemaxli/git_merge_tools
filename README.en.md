@@ -2,7 +2,7 @@
 
 [:cn: 简体中文](README.md) · :us: **English**
 
-**Current version v5.2.0** · see [Version history](#version-history) below
+**Current version v5.3.0** · see [Version history](#version-history) below
 
 Cross-platform PowerShell helpers for **safe, transactional** local Git branch consolidation —
 with an auto-degrading, capability-aware visual layer. Runs on **PowerShell 7+** (preferred) and
@@ -89,10 +89,11 @@ cross-command coupling; the remaining environment-module merge and git-safety ha
 
 ## Version history
 
-> Current version: **v5.2.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
+> Current version: **v5.3.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
 > from v4 on, the history follows the Git commit log.
 
-**v5.x — Modularization & engine unification (current)**
+**v5.x — Modularization, engine unification & ongoing hardening (current)**
+- **v5.3.0** — Git-safety hardening begins: the unified `Invoke-GitCommand` now **neutralizes inherited `GIT_DIR`/`GIT_WORK_TREE`/… locating env vars** (captured, cleared, restored), so a leaked variable can't silently point git at the wrong repository or bypass the path-containment guard.
 - **v5.2.0** — Extracted the `Merge.psm1` transactional engine; `gitmerge`/`gitsync` became thin peers on one engine, **removing the `gitsync → gitmerge` call**.
 - **v5.1.0** — Extracted `Core.psm1` (single source of truth for git primitives), consumed by all three commands; added a characterization test net for the merge engine.
 - **v5.0.0** — Latent-bug sweep: force UTF-8 capture of git output (non-ASCII branch names), non-destructive `gitmerge` fetch, `gitsync` honoring the sub-branch skip, `gitstatus` not folding stderr into porcelain, display-width-aware banner truncation; plus over-engineering descoped and dead code removed.

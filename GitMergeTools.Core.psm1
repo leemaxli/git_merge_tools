@@ -39,6 +39,15 @@ function Invoke-GitCommand {
 
     $previousPreference = $ErrorActionPreference
     $previousOutputEncoding = [Console]::OutputEncoding
+    # Neutralize inherited locating env vars (GIT_DIR/GIT_WORK_TREE/...): a leaked one silently points
+    # git at the WRONG repository and bypasses the path-based containment guard. Captured here and
+    # restored in finally, so there is no global side effect.
+    $gitLocatorNames = @('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_COMMON_DIR')
+    $savedGitLocators = @{}
+    foreach ($locatorName in $gitLocatorNames) {
+        $savedGitLocators[$locatorName] = [Environment]::GetEnvironmentVariable($locatorName)
+        if ($null -ne $savedGitLocators[$locatorName]) { Remove-Item -LiteralPath "Env:$locatorName" -ErrorAction SilentlyContinue }
+    }
     $ErrorActionPreference = 'Continue'
     try {
         # Decode git stdout as UTF-8 regardless of the console code page (cp936/OEM on a redirected or
@@ -71,6 +80,9 @@ function Invoke-GitCommand {
     finally {
         $ErrorActionPreference = $previousPreference
         [Console]::OutputEncoding = $previousOutputEncoding
+        foreach ($locatorName in $gitLocatorNames) {
+            if ($null -ne $savedGitLocators[$locatorName]) { Set-Item -LiteralPath "Env:$locatorName" -Value $savedGitLocators[$locatorName] -ErrorAction SilentlyContinue }
+        }
     }
 
     $output = @($rawOutput | ForEach-Object { $_.ToString() })
