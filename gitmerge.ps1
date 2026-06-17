@@ -87,6 +87,11 @@ function gitmerge {
         return $lines[0].Trim()
     }
 
+    function Test-GitMergeToolsSuppressWarningLocal {
+        $truthy = @('1', 'true', 'TRUE', 'yes', 'YES', 'on', 'ON')
+        return (($env:GITMERGE_TOOLS_SUPPRESS_WARNING -in $truthy) -or ($env:GITMERGE_VISUAL_SUPPRESS_WARNING -in $truthy))
+    }
+
     function New-OptionalGitMergeVisual {
         [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
             'PSUseShouldProcessForStateChangingFunctions',
@@ -118,7 +123,7 @@ function gitmerge {
                     return New-GitMergeToolsVisual -CommandName 'gitmerge' -ScriptRoot $PSScriptRoot -PSCommandPath $PSCommandPath
                 }
                 catch {
-                    $suppress = ($env:GITMERGE_TOOLS_SUPPRESS_WARNING -eq '1' -or $env:GITMERGE_VISUAL_SUPPRESS_WARNING -eq '1')
+                    $suppress = (Test-GitMergeToolsSuppressWarningLocal)
                     if (-not $suppress) {
                         Write-Warning "GitMergeTools.Common.psm1 could not initialize gitmerge visuals; using built-in basic output. $($_.Exception.Message)"
                         Write-Host "  Set `$env:GITMERGE_TOOLS_COMMON_MODULE to the common module path, or place GitMergeTools.Common.psm1 in the PowerShell profile directory." -ForegroundColor Yellow
@@ -129,7 +134,7 @@ function gitmerge {
             }
         }
 
-        $fallbackSuppress = ($env:GITMERGE_TOOLS_SUPPRESS_WARNING -eq '1' -or $env:GITMERGE_VISUAL_SUPPRESS_WARNING -eq '1')
+        $fallbackSuppress = (Test-GitMergeToolsSuppressWarningLocal)
         if (-not $fallbackSuppress) {
             Write-Warning "GitMergeTools.Common.psm1 was not found; gitmerge is using built-in basic output."
             Write-Host "  Set `$env:GITMERGE_TOOLS_COMMON_MODULE to the common module path, or place GitMergeTools.Common.psm1 beside the git tool scripts." -ForegroundColor Yellow
