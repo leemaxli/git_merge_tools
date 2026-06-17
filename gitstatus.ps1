@@ -34,8 +34,12 @@ function gitstatus {
         )
 
         $previousPreference = $ErrorActionPreference
+        $previousOutputEncoding = [Console]::OutputEncoding
         $ErrorActionPreference = 'Continue'
         try {
+            # Decode git stdout as UTF-8 regardless of the console code page (cp936/OEM on a redirected
+            # or 5.1 stdout) so non-ASCII branch names round-trip byte-exact (#1); restored in finally.
+            [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
             # Machine-parsed reads must NOT fold stderr into Output: a git warning (broken ref,
             # advice, locale hint) would otherwise be parsed as a porcelain line / phantom branch
             # (#4). stderr goes to the host error stream instead (matches gitmerge/gitsync).
@@ -59,6 +63,7 @@ function gitstatus {
         }
         finally {
             $ErrorActionPreference = $previousPreference
+            [Console]::OutputEncoding = $previousOutputEncoding
         }
 
         return [pscustomobject]@{

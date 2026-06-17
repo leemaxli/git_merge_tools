@@ -43,8 +43,12 @@ function gitmerge {
         )
 
         $previousPreference = $ErrorActionPreference
+        $previousOutputEncoding = [Console]::OutputEncoding
         $ErrorActionPreference = 'Continue'
         try {
+            # Decode git stdout as UTF-8 regardless of the console code page (cp936/OEM on a redirected
+            # or 5.1 stdout) so non-ASCII branch names round-trip byte-exact (#1); restored in finally.
+            [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
             if ([string]::IsNullOrEmpty($WorkingDirectory)) {
                 if ($MergeError) {
                     $rawOutput = @(& git @Arguments 2>&1)
@@ -71,6 +75,7 @@ function gitmerge {
         }
         finally {
             $ErrorActionPreference = $previousPreference
+            [Console]::OutputEncoding = $previousOutputEncoding
         }
 
         $output = @($rawOutput | ForEach-Object { $_.ToString() })
