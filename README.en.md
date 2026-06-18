@@ -2,7 +2,7 @@
 
 [:cn: 简体中文](README.md) · :us: **English**
 
-**Current version v6.1.0** · see [Version history](#version-history) below
+**Current version v6.2.0** · see [Version history](#version-history) below
 
 Cross-platform PowerShell helpers for **safe, transactional** local Git branch consolidation —
 with an auto-degrading, capability-aware visual layer. Runs on **PowerShell 7+** (preferred) and
@@ -99,17 +99,18 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # current runtime only
 
 ## Status
 
-Functional and fully tested (all known defects fixed; 85-test suite green on both runtimes). **The
+Functional and fully tested (all known defects fixed; 87-test suite green on both runtimes). **The
 core of the structural refactor is done**: `Core.psm1` (git primitives) and `Merge.psm1` (the
 transactional engine) are extracted, the three commands are thin peers on one engine with no
 cross-command coupling; the remaining environment-module merge and git-safety hardening are in progress.
 
 ## Version history
 
-> Current version: **v6.1.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
+> Current version: **v6.2.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
 > from v4 on, the history follows the Git commit log.
 
 **v6.x — Remote sync: pull, not just push (current)**
+- **v6.2.0** — Stage 3: `gitsync` also auto fast-forward-pulls a branch that *is* checked out, when its worktree is **clean** (via `merge --ff-only` in that worktree) — covering the common case of the current branch trailing origin. A dirty worktree is never touched; it still prompts.
 - **v6.1.0** — Stage 2: `gitsync` now *auto* fast-forward-pulls a branch that origin is ahead of when that branch is **not checked out** in any worktree (a compare-and-swap `update-ref` — the safest pull, no working tree to disturb). The REMOTE PULL phase is all-or-nothing: it classifies every branch read-only first, and if any branch still can't be safely synced (a checked-out fast-forward, or a divergence) it changes nothing and prompts.
 - **v6.0.0** — Critical gap fix: `gitsync` no longer hard-errors when `origin` is ahead of (or diverged from) a local branch. A new **REMOTE PULL phase** classifies each branch it will sync (`UpToDate`/`LocalAhead`/`FastForwardable`/`Diverged`) and, when a pull is required, stops with an actionable **`ACTION NEEDED`** prompt (e.g. `git pull --ff-only origin <branch>`) — changing nothing — instead of a cryptic failure. This is Stage 1 of a staged rollout; automatic *safe* pulling (fast-forward-only, then throwaway-worktree-validated clean merges) arrives in later v6.x sub-versions. `gitmerge` is unchanged.
 

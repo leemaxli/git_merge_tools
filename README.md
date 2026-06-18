@@ -2,7 +2,7 @@
 
 :cn: **简体中文** · [:us: English](README.en.md)
 
-**当前版本 v6.1.0** · 见下方[版本历史](#版本历史)
+**当前版本 v6.2.0** · 见下方[版本历史](#版本历史)
 
 跨平台 PowerShell 工具,用于**安全、事务式**地在本地把 Git 分支经 main 整合,并带一套按终端能力
 自动降级的视觉层。可运行于 **PowerShell 7+**(优先)与 **Windows PowerShell 5.1**,支持
@@ -94,15 +94,16 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # 仅当前运行时
 
 ## 状态
 
-功能完整、测试充分(已知缺陷全部修复;两运行时 85 项测试全绿)。**结构性重构主体已完成**:已抽出
+功能完整、测试充分(已知缺陷全部修复;两运行时 87 项测试全绿)。**结构性重构主体已完成**:已抽出
 `Core.psm1`(git 原语)与 `Merge.psm1`(事务引擎),三条命令成为同一引擎上的薄壳并去除了命令间耦合;
 后续的环境模块合并与 git 安全加固按路线图推进中。
 
 ## 版本历史
 
-> 当前版本:**v6.1.0**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
+> 当前版本:**v6.2.0**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
 
 **v6.x —— 远端同步:不止 push,还能 pull(当前)**
+- **v6.2.0** —— Stage 3:对**已 checkout 且工作树干净**的领先分支,`gitsync` 也会自动 fast-forward 拉取(在该 worktree 内 `merge --ff-only`)—— 覆盖"当前分支落后于 origin"这一最常见情形。工作树脏则绝不触碰,仍然提示。
 - **v6.1.0** —— Stage 2:当 origin 领先的分支**未在任何 worktree 被 checkout** 时,`gitsync` 现在会自动 fast-forward 拉取它(compare-and-swap `update-ref` —— 最安全的 pull,没有工作树需要扰动)。REMOTE PULL 阶段 all-or-nothing:先对所有分支只读分类,只要还有任一分支无法安全同步(已 checkout 的 fast-forward,或已分叉),就不改动任何东西并提示。
 - **v6.0.0** —— 关键缺失修复:`gitsync` 不再在 `origin` 领先于(或分叉于)本地分支时硬性报错。新增 **REMOTE PULL 阶段**,对每个将同步的分支分类(`UpToDate`/`LocalAhead`/`FastForwardable`/`Diverged`),需要 pull 时以可操作的 **`ACTION NEEDED`** 提示(如 `git pull --ff-only origin <分支>`)停下 —— 且不改动任何东西 —— 取代晦涩的失败。这是分阶段推出的 Stage 1;安全的**自动 pull**(先 fast-forward,再用临时 worktree 验证的干净合并)将随后续 v6.x 子版本到来。`gitmerge` 不变。
 

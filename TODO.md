@@ -17,7 +17,8 @@ was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; 
   nothing (replaces the old error exit).
 - ✅ **v6.1.0 — Stage 2 (done):** auto FF-pull a `FastForwardable` branch **not checked out** anywhere
   (CAS `update-ref`); all-or-nothing (classify read-only first; any unsafe branch → prompt, change nothing).
-- ⏳ **Stage 3:** FF-pull a checked-out branch with a **clean** worktree (`merge --ff-only`).
+- ✅ **v6.2.0 — Stage 3 (done):** FF-pull a checked-out branch with a **clean** worktree
+  (`merge --ff-only`); dirty worktree still prompts (never touched).
 - ⏳ **Stage 4:** `Diverged` but **no-conflict** → throwaway-worktree-validated merge, then advance.
 - Stage 5 (unsafe/conflict) is out of scope — always prompts.
 
@@ -128,9 +129,12 @@ was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; 
 - **Features:** capability-gated visual selection + upgrade advisory (surfaced by all three commands —
   gitmerge/gitsync/gitstatus, v5.8.0); display-width helpers.
 - **Tests:** dependency-free harness (no Pester), hermetic sandboxed repos + path-containment guard,
-  smoke/characterization/safety suites, a cross-runtime driver. **85 passing on both runtimes.**
+  smoke/characterization/safety suites, a cross-runtime driver. **87 passing on both runtimes.**
 - **v6.0.0 remote-sync Stage 1:** `Get-RemoteBranchSyncState` classifier (UpToDate/LocalAhead/
   FastForwardable/Diverged) + gitsync REMOTE PULL phase that stops with `ACTION NEEDED` (not an error)
   when origin is ahead/diverged, changing nothing. 7 new tests.
 - **v6.1.0 remote-sync Stage 2:** auto FF-pull of a not-checked-out branch via CAS `update-ref`;
-  all-or-nothing classify-then-pull. 2 new tests (`GitSyncFfPull.Tests.ps1`).
+  all-or-nothing classify-then-pull. (`GitSyncFfPull.Tests.ps1`).
+- **v6.2.0 remote-sync Stage 3:** auto FF-pull of a checked-out CLEAN branch via `merge --ff-only`
+  (dirty worktree still prompts). Tests use stable scenarios (conflicting-divergence = the permanent
+  prompt case). 87 tests.

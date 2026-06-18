@@ -340,20 +340,25 @@ function gitsync {
     # REMOTE PULL phase (v6.x): bring origin updates into local where SAFE, else stop with ACTION NEEDED.
     # All-or-nothing + fail-fast: classify every branch READ-ONLY first; if ANY branch cannot be safely
     # synced at this stage, change nothing and prompt. Only when the whole set is safe do we mutate.
-    #   Stage 2: a FastForwardable branch that is NOT checked out in any worktree -> CAS update-ref FF
-    #            (no working tree to disturb, the safest pull). Checked-out FF and Diverged still prompt.
+    #   Stage 2: FastForwardable + NOT checked out anywhere      -> CAS update-ref FF (no tree to disturb)
+    #   Stage 3: FastForwardable + checked out + CLEAN worktree   -> merge --ff-only in that worktree
+    #            FastForwardable + checked out + DIRTY worktree   -> prompt (never touch a dirty tree)
+    #            Diverged                                         -> prompt (Stage 4 handles no-conflict)
     $worktrees = @(Get-WorktreeRecord $repository)
-    $autoPullable = [System.Collections.Generic.List[string]]::new()
+    $pullPlan = [System.Collections.Generic.List[object]]::new()
     $needManual = [System.Collections.Generic.List[string]]::new()
     foreach ($branch in $pushBranches) {
         switch (Get-RemoteBranchSyncState -Repository $repository -Branch $branch) {
             'FastForwardable' {
                 $branchWorktree = Find-BranchWorktree $worktrees $branch
                 if ($null -eq $branchWorktree) {
-                    $autoPullable.Add($branch)
+                    $pullPlan.Add([pscustomobject]@{ Branch = $branch; Method = 'ref'; Worktree = $null })
+                }
+                elseif (Test-CleanWorktree $branchWorktree) {
+                    $pullPlan.Add([pscustomobject]@{ Branch = $branch; Method = 'worktree'; Worktree = $branchWorktree })
                 }
                 else {
-                    $needManual.Add("origin/$branch is ahead of local '$branch' (checked out at $($branchWorktree.Path)). Pull it first:  git pull --ff-only origin $branch")
+                    $needManual.Add("origin/$branch is ahead of local '$branch', but its worktree ($($branchWorktree.Path)) is not clean (see above). Make it clean, then retry  (or:  git pull --ff-only origin $branch).")
                 }
             }
             'Diverged' {
@@ -368,19 +373,25 @@ function gitsync {
         $syncResult = 'ACTION NEEDED'
         return $false
     }
-    if ($autoPullable.Count -gt 0) {
-        Write-Stage -Title 'REMOTE PULL' -Subtitle 'Fast-forward local branches from origin (safe: not checked out)' -StageIcon 'REMOTE'
-        foreach ($branch in $autoPullable) {
-            $localRef = "refs/heads/$branch"
-            $oldHash = Get-RefHash $repository $localRef
-            $newHash = Get-RefHash $repository "refs/remotes/origin/$branch"
-            $pull = Invoke-GitCommand $repository @('update-ref', '-m', 'gitsync: fast-forward from origin', $localRef, $newHash, $oldHash) -MergeError
+    if ($pullPlan.Count -gt 0) {
+        Write-Stage -Title 'REMOTE PULL' -Subtitle 'Fast-forward local branches from origin (safe: not checked out, or checked out and clean)' -StageIcon 'REMOTE'
+        foreach ($item in $pullPlan) {
+            $remoteRef = "refs/remotes/origin/$($item.Branch)"
+            if ($item.Method -eq 'ref') {
+                $localRef = "refs/heads/$($item.Branch)"
+                $oldHash = Get-RefHash $repository $localRef
+                $newHash = Get-RefHash $repository $remoteRef
+                $pull = Invoke-GitCommand $repository @('update-ref', '-m', 'gitsync: fast-forward from origin', $localRef, $newHash, $oldHash) -MergeError
+            }
+            else {
+                $pull = Invoke-GitCommand $item.Worktree.Path @('merge', '--ff-only', $remoteRef) -MergeError
+            }
             if ($pull.ExitCode -ne 0) {
-                Write-GitFailure "Cannot fast-forward '$branch' from origin/$branch" $pull
-                $failureReason = "Failed to fast-forward '$branch' from origin."
+                Write-GitFailure "Cannot fast-forward '$($item.Branch)' from origin/$($item.Branch)" $pull
+                $failureReason = "Failed to fast-forward '$($item.Branch)' from origin."
                 return $false
             }
-            Write-StatusLine -Marker '✓' -Message "Pulled origin/$branch into local '$branch' (fast-forward)." -Color Green
+            Write-StatusLine -Marker '✓' -Message "Pulled origin/$($item.Branch) into local '$($item.Branch)' (fast-forward)." -Color Green
         }
     }
     Write-StatusLine -Marker '✓' -Message "Remote is in sync or behind local for: $($pushBranches -join ', '). Proceeding." -Color Green
