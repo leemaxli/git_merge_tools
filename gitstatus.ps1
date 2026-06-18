@@ -191,7 +191,7 @@ function gitstatus {
             }
         }
 
-        $log = Invoke-GitCommand $Repository @('log', '--oneline', '--decorate', '-5', $Branch) -SuppressError
+        $log = Invoke-GitCommand $Repository @('log', '--oneline', '--decorate', '-10', $Branch) -SuppressError
         $mainCompare = if ($Branch -ceq $MainBranch) {
             [pscustomobject]@{ LeftOnly = 0; RightOnly = 0 }
         }

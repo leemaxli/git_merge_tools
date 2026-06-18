@@ -149,7 +149,7 @@ function gitmerge {
         if ($null -ne $visual) {
             $recentLines = @()
             if (-not $State.DryRun -and -not [string]::IsNullOrWhiteSpace($State.Repository) -and -not [string]::IsNullOrWhiteSpace($State.MainBranch)) {
-                $recent = Invoke-GitCommand $State.Repository @('log', '--oneline', '-5', $State.MainBranch)
+                $recent = Invoke-GitCommand $State.Repository @('log', '--oneline', '-10', $State.MainBranch)
                 if ($recent.ExitCode -eq 0 -and @($recent.Output).Count -gt 0) {
                     $recentLines = @($recent.Output)
                 }
@@ -211,7 +211,7 @@ function gitmerge {
         }
 
         if (-not $State.DryRun -and -not [string]::IsNullOrWhiteSpace($State.Repository) -and -not [string]::IsNullOrWhiteSpace($State.MainBranch)) {
-            $recent = Invoke-GitCommand $State.Repository @('log', '--oneline', '-5', $State.MainBranch)
+            $recent = Invoke-GitCommand $State.Repository @('log', '--oneline', '-10', $State.MainBranch)
             if ($recent.ExitCode -eq 0 -and @($recent.Output).Count -gt 0) {
                 Write-Host ''
                 Write-Host "── Recent commits on $($State.MainBranch) ──" -ForegroundColor DarkGray
