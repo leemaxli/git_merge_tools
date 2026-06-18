@@ -60,6 +60,32 @@ function Get-WorktreeInProgressOperation {
     return $null
 }
 
+function Get-RemoteBranchSyncState {
+    # Pure classifier driving the gitsync REMOTE PULL phase (v6.x): how does local <Branch> relate to
+    # origin/<Branch>?  Returns:
+    #   'UpToDate'        - equal, or no origin branch (nothing to pull)
+    #   'LocalAhead'      - origin is a strict ancestor of local (normal push case)
+    #   'FastForwardable' - local is a strict ancestor of origin (a safe pull would advance local)
+    #   'Diverged'        - neither is an ancestor of the other
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$Repository,
+        [Parameter(Mandatory)][string]$Branch
+    )
+
+    $localRef = "refs/heads/$Branch"
+    $remoteRef = "refs/remotes/origin/$Branch"
+    $localHash = Get-RefHash $Repository $localRef
+    $remoteHash = Get-RefHash $Repository $remoteRef
+    if (-not $remoteHash) { return 'UpToDate' }       # nothing on origin to pull
+    if (-not $localHash) { return 'FastForwardable' } # origin has it, local doesn't (a pull would create it)
+    if ($localHash -eq $remoteHash) { return 'UpToDate' }
+    if (Test-Ancestor -Repository $Repository -Ancestor $remoteRef -Descendant $localRef) { return 'LocalAhead' }
+    if (Test-Ancestor -Repository $Repository -Ancestor $localRef -Descendant $remoteRef) { return 'FastForwardable' }
+    return 'Diverged'
+}
+
 function Test-CleanWorktree {
     param([Parameter(Mandatory)]$Worktree)
     if ($Worktree.Locked) {
@@ -667,6 +693,7 @@ function Invoke-GitMergeConsolidation {
 
 Export-ModuleMember -Function @(
     'Get-WorktreeInProgressOperation',
+    'Get-RemoteBranchSyncState',
     'Test-CleanWorktree',
     'Test-TemporaryWorktreeForCleanup',
     'Invoke-TemporaryCleanup',
