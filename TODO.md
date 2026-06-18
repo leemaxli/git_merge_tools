@@ -9,7 +9,16 @@ regression-lock or deletion-driven simplification in the discovery / visual-plum
 
 ## Backlog (leaned)
 
-### v6.x — remote sync: pull, not just push (ACTIVE; spec + plan in docs/superpowers)
+### v7 — `all`/`cross-all` topology redesign (SPEC'd, awaiting user review of the spec)
+Redefines the params (user decision 2026-06-18): `all` = current-branch STAR (only the hub accumulates;
+others stay independent + gitsync-sync their own remote; abort if the hub can't act); `cross-all` = full
+MESH converging to the union (skip a whole branch on any conflict); `gitmerge cross-all` = `gitsync` minus
+remote sync. Spec: `docs/superpowers/specs/2026-06-18-v7-topology-redesign.md`. HARD CONSTRAINT + v6.x
+safety primitives reused; push model becomes per-branch. Staged v7.0–v7.3. The 2026-06-18 coverage sweep's
+9 gaps are folded into the v7 test plan (in the spec); the one topology-independent gap — the merge-`commit-tree`
+CONTENT binding — is **already closed** (`GitSyncDivergedMerge` now asserts merged content, not just ancestry).
+
+### v6.x — remote sync: pull, not just push (DONE through v6.7.1; spec + plan in docs/superpowers)
 The critical gap: `gitsync` had no path to bring origin updates into local — it hard-errored when origin
 was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; README records only majors.
 - ✅ **v6.0.0 — Stage 1 (done):** `Get-RemoteBranchSyncState` classifier + a REMOTE PULL phase that

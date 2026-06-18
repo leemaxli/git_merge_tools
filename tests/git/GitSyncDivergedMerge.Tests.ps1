@@ -36,6 +36,10 @@ Test-Case 'gitsync Stage 4: auto-merges a not-checked-out diverged branch when t
         Assert-Equal 0 $anc1.ExitCode -Message "origin's commit must be an ancestor of merged feature/x"
         $anc2 = Invoke-SandboxGit $ctx.Sandbox.Repo @('merge-base', '--is-ancestor', $ctx.LocalTip, 'refs/heads/feature/x')
         Assert-Equal 0 $anc2.ExitCode -Message "local's commit must be an ancestor of merged feature/x"
+        # CONTENT binding: the worktree-free merge builds the commit from merge-tree's tree via commit-tree;
+        # ancestry alone would pass even if a side's content were dropped. Assert BOTH sides' files survive.
+        Assert-Equal 0 (Invoke-SandboxGit $ctx.Sandbox.Repo @('cat-file', '-e', 'refs/heads/feature/x:a.txt')).ExitCode -Message "merged tree must contain local's a.txt (not just be a descendant)"
+        Assert-Equal 0 (Invoke-SandboxGit $ctx.Sandbox.Repo @('cat-file', '-e', 'refs/heads/feature/x:b.txt')).ExitCode -Message "merged tree must contain origin's b.txt (not just be a descendant)"
     } finally { Remove-GitSandbox $ctx.Sandbox }
 }
 
@@ -113,6 +117,9 @@ Test-Case 'gitsync Stage 4b: auto-merges a checked-out CLEAN diverged branch via
         Assert-Equal 0 $anc1.ExitCode -Message "origin's commit must be an ancestor of merged main"
         $anc2 = Invoke-SandboxGit $ctx.Sandbox.Repo @('merge-base', '--is-ancestor', $ctx.LocalTip, 'refs/heads/main')
         Assert-Equal 0 $anc2.ExitCode -Message "local's commit must be an ancestor of merged main"
+        # CONTENT binding (worktree merge): both sides' files must actually be present in the merged tree.
+        Assert-Equal 0 (Invoke-SandboxGit $ctx.Sandbox.Repo @('cat-file', '-e', 'refs/heads/main:a.txt')).ExitCode -Message "merged main must contain local's a.txt"
+        Assert-Equal 0 (Invoke-SandboxGit $ctx.Sandbox.Repo @('cat-file', '-e', 'refs/heads/main:b.txt')).ExitCode -Message "merged main must contain origin's b.txt"
     } finally { Remove-GitSandbox $ctx.Sandbox }
 }
 
