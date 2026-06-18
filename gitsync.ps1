@@ -412,7 +412,7 @@ function gitsync {
         $mainUnsafe = @($needManual | Where-Object { $_.Branch -ceq $mainBranch })
         # MAIN unsafe, or a single explicitly-selected branch is unsafe -> ABORT, change nothing. (With
         # all/cross-all there are other branches to proceed with, so non-main targets are skipped instead.)
-        if ($mainUnsafe.Count -gt 0 -or $mode -ne 'all') {
+        if ($mainUnsafe.Count -gt 0 -or $mode -notin @('all','cross-all')) {
             Write-Stage -Title 'ACTION NEEDED' -Subtitle 'origin has updates that cannot be safely auto-pulled; nothing was changed' -StageIcon 'REMOTE' -Color Yellow
             foreach ($entry in $needManual) { Write-StatusLine -Marker '!' -Message $entry.Message -Color Yellow }
             Write-StatusLine -Marker 'i' -Message 'Nothing was changed. Resolve the above, then re-run gitsync.' -Color DarkGray

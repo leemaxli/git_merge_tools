@@ -82,6 +82,32 @@ Test-Case 'gitmerge all: a dirty HUB worktree aborts; nothing changed' {
     } finally { Remove-GitSandbox $sb }
 }
 
+Test-Case 'gitmerge all: a dirty non-hub spoke is skipped; a clean spoke still merges; run succeeds' {
+    $sb = New-GitSandbox
+    try {
+        $base = New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base'
+        New-SandboxBranch -Sandbox $sb -Name 'branch-clean' -StartPoint $base
+        Invoke-SandboxGit $sb.Repo @('switch','branch-clean') | Out-Null
+        $cleanWork = New-SandboxCommit -Sandbox $sb -FileName 'clean.txt' -Content "clean`n" -Message 'clean work'
+        New-SandboxBranch -Sandbox $sb -Name 'branch-dirty' -StartPoint $base
+        Invoke-SandboxGit $sb.Repo @('switch','branch-dirty') | Out-Null
+        $dirtyWork = New-SandboxCommit -Sandbox $sb -FileName 'd.txt' -Content "d`n" -Message 'dirty branch work'
+        Invoke-SandboxGit $sb.Repo @('switch','main') | Out-Null
+        # check out branch-dirty in a separate worktree and dirty it
+        $wtD = Join-Path $sb.Root 'wt-dirty'
+        Invoke-SandboxGit $sb.Repo @('worktree','add', $wtD, 'branch-dirty') | Out-Null
+        Set-Content -LiteralPath (Join-Path $wtD 'd.txt') -Value "uncommitted`n" -Encoding utf8
+        $dirtyBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-dirty'
+
+        $ok = Invoke-ProductCommand -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'all' -Sandbox $sb
+        Assert-True $ok 'star run should succeed (skip-and-proceed past the dirty spoke)'
+        Assert-True ((Invoke-SandboxGit $sb.Repo @('merge-base','--is-ancestor',$cleanWork,'refs/heads/main')).ExitCode -eq 0) 'hub absorbed the clean spoke'
+        Assert-False ((Invoke-SandboxGit $sb.Repo @('merge-base','--is-ancestor',$dirtyWork,'refs/heads/main')).ExitCode -eq 0) 'hub must NOT absorb the dirty (skipped) spoke'
+        Assert-Equal $dirtyBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-dirty') -Message 'skipped dirty spoke left untouched'
+        Invoke-SandboxGit $sb.Repo @('worktree','remove','--force', $wtD) | Out-Null
+    } finally { Remove-GitSandbox $sb }
+}
+
 Test-Case 'gitmerge all: no temp worktree leaks' {
     $sb = New-GitSandbox
     try {
