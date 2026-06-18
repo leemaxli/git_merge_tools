@@ -2,7 +2,7 @@
 
 :cn: **简体中文** · [:us: English](README.en.md)
 
-**当前版本 v7.2** · 见下方[版本历史](#版本历史)
+**当前版本 v7.3** · 见下方[版本历史](#版本历史)
 
 跨平台 PowerShell 工具,用于**安全、事务式**地在本地把 Git 分支经 main 整合,并带一套按终端能力
 自动降级的视觉层。可运行于 **PowerShell 7+**(优先)与 **Windows PowerShell 5.1**,支持
@@ -100,10 +100,11 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # 仅当前运行时
 
 ## 版本历史
 
-> 当前版本:**v7.2**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
+> 当前版本:**v7.3**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
 > 旧版历史精简:超过最近 5 个大版本的旧版本只保留大版本(`.0`)信息(当前 v7.x,故 v1、v2 仅留各自 `.0`)。
 
 **v7.x —— 拓扑重定义:star / mesh,去 main 中心(当前)**
+- **v7.3** —— `gitsync` 全面采用新拓扑 + **逐分支远端同步**:每种参数(2-branch / all / cross-all)= 对应的 `gitmerge` 拓扑,外加合并前安全拉取每个涉及的 `origin/<分支>`、合并后**逐分支推送**其各自的 `origin/<分支>`(单 ref 普通推送,被拒即跳过、绝不 force);取代"经 main + 一次 atomic 推送 main+分支"的旧模型。不安全的 main 或星形 hub 则中止。
 - **v7.2** —— `gitmerge cross-all` 改为**去 main 中心的全网状(mesh)**:所有分支收敛到同一个并集提交(当前分支为基,`main` 只是普通参与者);合并冲突 → fail-fast 中止(什么都不改),工作树脏的分支 → 跳过、其余照常收敛;`gitmerge debug` 改为该 mesh 的 dry-run(只报告、不改动)。`gitsync` 暂未变。
 - **v7.1** —— `gitmerge all` 改为**当前分支星形**:hub=当前分支吸收所有其它分支(hub=全部并集),每个其它分支反向合并 hub 的**原始**提交(`分支 = 原始hub ∪ 分支`,分支之间互不传递工作);冲突或工作树脏的分支跳过、其余照常(skip-and-proceed),hub 自身工作树脏则中止整次运行。`cross-all`/`debug`/`gitsync` 暂未变。
 - **v7.0** —— `gitmerge`(空参 / `{分支}`)改为**当前分支 ↔ 目标分支**双向收敛,去 main 中心:`gitmerge {分支}` 现在合并当前分支与该分支(不再经 main);`gitmerge` 指向当前分支时为空操作提醒;在 feature 上 `gitmerge main` 收敛 feature↔main;目标分支含未合并子分支时照常收敛(纯 fast-forward,不丢任何提交)。`all`/`cross-all`/`debug`/`gitsync` 暂未变。
