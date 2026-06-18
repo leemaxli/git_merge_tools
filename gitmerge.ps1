@@ -269,6 +269,14 @@ function gitmerge {
             @(Invoke-StarMerge -RunState $runState -Visual $visual) |
                 Where-Object { $_ -is [bool] } | Select-Object -Last 1
         }
+        elseif ($mode -eq 'cross-all') {
+            @(Invoke-MeshMerge -RunState $runState -Visual $visual) |
+                Where-Object { $_ -is [bool] } | Select-Object -Last 1
+        }
+        elseif ($mode -eq 'debug') {
+            @(Invoke-MeshMerge -RunState $runState -Visual $visual -DryRun) |
+                Where-Object { $_ -is [bool] } | Select-Object -Last 1
+        }
         else {
             @(Invoke-GitMergeConsolidation -BranchName $BranchName -RunState $runState -Visual $visual) |
                 Where-Object { $_ -is [bool] } | Select-Object -Last 1
