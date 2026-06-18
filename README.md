@@ -2,7 +2,7 @@
 
 :cn: **简体中文** · [:us: English](README.en.md)
 
-**当前版本 v6.5.0** · 见下方[版本历史](#版本历史)
+**当前版本 v6.6.0** · 见下方[版本历史](#版本历史)
 
 跨平台 PowerShell 工具,用于**安全、事务式**地在本地把 Git 分支经 main 整合,并带一套按终端能力
 自动降级的视觉层。可运行于 **PowerShell 7+**(优先)与 **Windows PowerShell 5.1**,支持
@@ -94,15 +94,16 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # 仅当前运行时
 
 ## 状态
 
-功能完整、测试充分(已知缺陷全部修复;两运行时 97 项测试全绿)。**结构性重构主体已完成**:已抽出
+功能完整、测试充分(已知缺陷全部修复;两运行时 99 项测试全绿)。**结构性重构主体已完成**:已抽出
 `Core.psm1`(git 原语)与 `Merge.psm1`(事务引擎),三条命令成为同一引擎上的薄壳并去除了命令间耦合;
 后续的环境模块合并与 git 安全加固按路线图推进中。
 
 ## 版本历史
 
-> 当前版本:**v6.5.0**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
+> 当前版本:**v6.6.0**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
 
 **v6.x —— 远端同步:不止 push,还能 pull(当前)**
+- **v6.6.0** —— skip-and-proceed(引擎层):`gitmerge`/`gitsync` 用 `all`/`cross-all` 时,当**非 main** 目标分支工作树无法安全参与(脏,或处于 merge/rebase/cherry-pick/revert 中)时,不再中止整个运行 —— 该分支**跳过并警告**,其余照常整合(与 `#10` 子分支跳过一致)。main 工作树脏或操作进行中仍然中止(一切都经 main 整合)。
 - **v6.5.0** —— `gitsync` / `gitstatus` 的运行 summary 现在会显示**远端位置**(origin URL),而不仅是本地仓库路径——让你看清在和哪儿同步/对比。
 - **v6.4.1** —— 安全修复(由对 v6.x 代码的对抗式审查发现):两条无 worktree 的 pull 路径现在对**分类时捕获**的分支 tip 做 compare-and-swap(经新的 `Move-BranchRefSafely`,带真正的 fast-forward 守护),而非重新读取的 tip。这堵住了一个跨阶段竞态:在两阶段之间被**并发**写入推进的分支可能被横向强移(丢弃新提交)或合并到陈旧树上。已 checkout 的路径本就安全(实时 `git merge` 会重新校验)。
 - **v6.4.0** —— Stage 4(已 checkout):分叉无冲突自动合并现在也覆盖**已 checkout 且工作树干净**的分支(最常见情形——你的*当前*分支与 origin 分叉),在同样的 `merge-tree` 内存验证后用 `merge --no-edit` 应用。工作树脏或合并有冲突仍提示。至此安全同步全部落地:`gitsync` 会自动 pull/merge 所有不冒险丢失你工作的情形(fast-forward 与无冲突合并),其余(工作树脏、冲突分叉)则提示——绝不 reset、rebase 或 force-push。

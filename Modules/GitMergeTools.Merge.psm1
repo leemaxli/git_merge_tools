@@ -547,17 +547,34 @@ function Invoke-GitMergeConsolidation {
         Write-StatusLine -Marker '✓' -Message "Worktrees discovered: $($worktrees.Count)" -Color Green
         $mainWorktree = Find-BranchWorktree $worktrees $mainBranch
 
-        $affectedWorktrees = @($worktrees | Where-Object {
-            $_.Branch -ceq $mainBranch -or $_.Branch -cin $targetBranches
-        })
-        $preflightOk = $true
-        foreach ($worktree in $affectedWorktrees) {
-            if (-not (Test-CleanWorktree $worktree)) { $preflightOk = $false }
-        }
-        if (-not $preflightOk) {
-            $runState.FailureReason = 'No refs were changed because an affected worktree is not clean.'
+        # MAIN must be clean -- everything is consolidated through it; an unclean main aborts the run.
+        if ($null -ne $mainWorktree -and -not (Test-CleanWorktree $mainWorktree)) {
+            $runState.FailureReason = "No refs were changed because the '$mainBranch' worktree is not clean."
             Write-Warning $runState.FailureReason
             return $false
+        }
+        # A TARGET whose worktree can't safely participate (dirty / mid-operation) is SKIPPED with a
+        # warning -- the rest still consolidate (skip-and-proceed, consistent with the #10 sub-branch skip).
+        $cleanTargets = [System.Collections.Generic.List[string]]::new()
+        foreach ($target in $targetBranches) {
+            $targetWorktree = Find-BranchWorktree $worktrees $target
+            if ($null -ne $targetWorktree -and -not (Test-CleanWorktree $targetWorktree)) {
+                if (-not $runState.SkippedBranches.Contains($target)) { $runState.SkippedBranches.Add($target) }
+                Write-StatusLine -Marker '✗' -Message "Skipping '$target': its worktree is not clean (see above). Commit/stash it, then re-run to include it." -Color Yellow
+            }
+            else {
+                $cleanTargets.Add($target)
+            }
+        }
+        $targetBranches = @($cleanTargets.ToArray())
+        # Keep the run-state target list in sync with what will actually be consolidated.
+        $runState.TargetBranches.Clear()
+        foreach ($branch in $targetBranches) { $runState.TargetBranches.Add($branch) }
+        if ($targetBranches.Count -eq 0) {
+            Write-StatusLine -Marker '✓' -Message 'All selected branches were skipped; nothing to consolidate.' -Color Green
+            $runState.Result = 'SUCCESS'
+            $runState.MainPublished = 'NOT REQUIRED'
+            return $true
         }
         Write-StatusLine -Marker '✓' -Message 'Affected worktrees are clean.' -Color Green
 
