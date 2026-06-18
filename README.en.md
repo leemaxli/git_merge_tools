@@ -2,7 +2,7 @@
 
 [:cn: 简体中文](README.md) · :us: **English**
 
-**Current version v7.0** · see [Version history](#version-history) below
+**Current version v7.1** · see [Version history](#version-history) below
 
 Cross-platform PowerShell helpers for **safe, transactional** local Git branch consolidation —
 with an auto-degrading, capability-aware visual layer. Runs on **PowerShell 7+** (preferred) and
@@ -106,11 +106,12 @@ cross-command coupling; the remaining environment-module merge and git-safety ha
 
 ## Version history
 
-> Current version: **v7.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
+> Current version: **v7.1**. Early v1–v3 predate Git tracking and are a summarized retrospective;
 > from v4 on, the history follows the Git commit log.
 > Old-history trimming: versions more than 5 majors back keep only their major (`.0`) line (at v7.x, v1 and v2 keep just their `.0`).
 
 **v7.x — Topology redefinition: star / mesh, de-main-centered (current)**
+- **v7.1** — `gitmerge all` becomes a **current-branch star**: the hub (current branch) absorbs every other branch (hub = union of all), and each other branch reverse-merges the hub's **original** commit (`branch = original-hub ∪ branch`, with no spoke-to-spoke transfer); a conflicting or dirty-worktree spoke is skipped and the rest proceed (skip-and-proceed), while a dirty hub worktree aborts the whole run. `cross-all`/`debug`/`gitsync` unchanged for now.
 - **v7.0** — `gitmerge` (empty / `{branch}`) now merges the **current branch and the target** bidirectionally, de-main-centered: `gitmerge {branch}` merges the current branch with that branch (no longer through `main`); `gitmerge` naming the current branch is a no-op reminder; `gitmerge main` from a feature converges feature↔main; a target with an unmerged descendant now converges anyway (a pure fast-forward — no commit is lost). `all`/`cross-all`/`debug`/`gitsync` unchanged for now.
 
 **v6.x — Remote sync: pull, not just push**
