@@ -2,7 +2,7 @@
 
 [:cn: 简体中文](README.md) · :us: **English**
 
-**Current version v6.8.0** · see [Version history](#version-history) below
+**Current version v7.0** · see [Version history](#version-history) below
 
 Cross-platform PowerShell helpers for **safe, transactional** local Git branch consolidation —
 with an auto-degrading, capability-aware visual layer. Runs on **PowerShell 7+** (preferred) and
@@ -106,11 +106,14 @@ cross-command coupling; the remaining environment-module merge and git-safety ha
 
 ## Version history
 
-> Current version: **v6.8.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
+> Current version: **v7.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
 > from v4 on, the history follows the Git commit log.
-> Old-history trimming: versions more than 5 majors back keep only their major (`.0`) line (at v6.x, v1 keeps just v1.0).
+> Old-history trimming: versions more than 5 majors back keep only their major (`.0`) line (at v7.x, v1 and v2 keep just their `.0`).
 
-**v6.x — Remote sync: pull, not just push (current)**
+**v7.x — Topology redefinition: star / mesh, de-main-centered (current)**
+- **v7.0** — `gitmerge` (empty / `{branch}`) now merges the **current branch and the target** bidirectionally, de-main-centered: `gitmerge {branch}` merges the current branch with that branch (no longer through `main`); `gitmerge` naming the current branch is a no-op reminder; `gitmerge main` from a feature converges feature↔main; a target with an unmerged descendant now converges anyway (a pure fast-forward — no commit is lost). `all`/`cross-all`/`debug`/`gitsync` unchanged for now.
+
+**v6.x — Remote sync: pull, not just push**
 - **v6.8.0** — All three commands' run summaries now show 10 recent commits (was 5); `gitsync`'s summary gains a "recent commits" block it previously lacked.
 - **v6.7.1** — Test-only: safety regression-locks for the two most dangerous operations — a meta-scan pinning gitsync's `push --atomic` (and that gitmerge/gitstatus/engine never push), and negative-case tests for `Test-TemporaryWorktreeForCleanup`, the gate before the only `git worktree remove --force`.
 - **v6.7.0** — Skip-and-proceed (gitsync): with `all`/`cross-all`, `gitsync` now **skips** a non-main branch that can't be safely pulled (dirty worktree, or a conflicting divergence) and syncs the rest, instead of aborting the whole run. The skipped branch is excluded from the pull, the consolidation, **and** the push (never force-pushed) and is left untouched. A single explicitly-selected branch, or an unsafe `main`, still stops with `ACTION NEEDED`.
@@ -141,9 +144,7 @@ cross-command coupling; the remaining environment-module merge and git-safety ha
 - **v3.0** — Began using Git for version control; the visual layer evolved from plain text toward tiered rendering.
 
 **v2.x — Three commands & basic visuals (retrospective)**
-- **v2.2** — Basic visual style: stage headers, status lines, a result summary.
-- **v2.1** — First `gitstatus` (read-only enhanced status).
-- **v2.0** — Added `gitsync` and `gitpush` alongside `gitmerge` (atomic push; later folded into `gitsync`).
+- **v2.0** — The three-command shape emerged: added `gitsync`/`gitpush` alongside `gitmerge` (atomic push, later folded into `gitsync`) plus the first `gitstatus`, with basic visuals (stage headers / status lines / result summary).
 
 **v1.x — Genesis (retrospective, pre-Git)**
 - **v1.0** — The first `gitmerge`: a single script consolidating local branches through `main` (transactional temporary-worktree integration, `--ff-only` advancement).
