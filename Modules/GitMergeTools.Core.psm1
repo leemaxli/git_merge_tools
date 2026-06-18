@@ -48,6 +48,19 @@ function Invoke-GitCommand {
         $savedGitLocators[$locatorName] = [Environment]::GetEnvironmentVariable($locatorName)
         if ($null -ne $savedGitLocators[$locatorName]) { Remove-Item -LiteralPath "Env:$locatorName" -ErrorAction SilentlyContinue }
     }
+    # Non-interactive profile: fail fast instead of blocking on a credential prompt, and never spawn an
+    # editor. Both are inherited env vars (highest precedence), captured here and restored in finally so
+    # there is no global side effect.
+    $nonInteractiveEnv = @{ GIT_TERMINAL_PROMPT = '0'; GIT_EDITOR = 'true' }
+    $savedNonInteractiveEnv = @{}
+    foreach ($envName in @($nonInteractiveEnv.Keys)) {
+        $savedNonInteractiveEnv[$envName] = [Environment]::GetEnvironmentVariable($envName)
+        Set-Item -LiteralPath "Env:$envName" -Value $nonInteractiveEnv[$envName] -ErrorAction SilentlyContinue
+    }
+    # Per-invocation config overrides (visible to git for this process only): long-path safety on the
+    # tool's own file operations (a no-op off Windows), and rerere disabled so a user's recorded conflict
+    # resolution can never silently auto-resolve one of our throwaway integration merges.
+    $gitConfigArgs = @('-c', 'core.longpaths=true', '-c', 'rerere.enabled=false')
     $ErrorActionPreference = 'Continue'
     try {
         # Decode git stdout as UTF-8 regardless of the console code page (cp936/OEM on a redirected or
@@ -55,24 +68,24 @@ function Invoke-GitCommand {
         [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
         if ([string]::IsNullOrEmpty($WorkingDirectory)) {
             if ($MergeError) {
-                $rawOutput = @(& git @Arguments 2>&1)
+                $rawOutput = @(& git @gitConfigArgs @Arguments 2>&1)
             }
             elseif ($SuppressError) {
-                $rawOutput = @(& git @Arguments 2>$null)
+                $rawOutput = @(& git @gitConfigArgs @Arguments 2>$null)
             }
             else {
-                $rawOutput = @(& git @Arguments)
+                $rawOutput = @(& git @gitConfigArgs @Arguments)
             }
         }
         else {
             if ($MergeError) {
-                $rawOutput = @(& git -C $WorkingDirectory @Arguments 2>&1)
+                $rawOutput = @(& git -C $WorkingDirectory @gitConfigArgs @Arguments 2>&1)
             }
             elseif ($SuppressError) {
-                $rawOutput = @(& git -C $WorkingDirectory @Arguments 2>$null)
+                $rawOutput = @(& git -C $WorkingDirectory @gitConfigArgs @Arguments 2>$null)
             }
             else {
-                $rawOutput = @(& git -C $WorkingDirectory @Arguments)
+                $rawOutput = @(& git -C $WorkingDirectory @gitConfigArgs @Arguments)
             }
         }
         $exitCode = $LASTEXITCODE
@@ -82,6 +95,10 @@ function Invoke-GitCommand {
         [Console]::OutputEncoding = $previousOutputEncoding
         foreach ($locatorName in $gitLocatorNames) {
             if ($null -ne $savedGitLocators[$locatorName]) { Set-Item -LiteralPath "Env:$locatorName" -Value $savedGitLocators[$locatorName] -ErrorAction SilentlyContinue }
+        }
+        foreach ($envName in @($savedNonInteractiveEnv.Keys)) {
+            if ($null -eq $savedNonInteractiveEnv[$envName]) { Remove-Item -LiteralPath "Env:$envName" -ErrorAction SilentlyContinue }
+            else { Set-Item -LiteralPath "Env:$envName" -Value $savedNonInteractiveEnv[$envName] -ErrorAction SilentlyContinue }
         }
     }
 

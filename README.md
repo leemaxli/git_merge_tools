@@ -2,7 +2,7 @@
 
 :cn: **简体中文** · [:us: English](README.en.md)
 
-**当前版本 v5.5.0** · 见下方[版本历史](#版本历史)
+**当前版本 v5.6.0** · 见下方[版本历史](#版本历史)
 
 跨平台 PowerShell 工具,用于**安全、事务式**地在本地把 Git 分支经 main 整合,并带一套按终端能力
 自动降级的视觉层。可运行于 **PowerShell 7+**(优先)与 **Windows PowerShell 5.1**,支持
@@ -90,15 +90,16 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # 仅当前运行时
 
 ## 状态
 
-功能完整、测试充分(已知缺陷全部修复;两运行时 62 项测试全绿)。**结构性重构主体已完成**:已抽出
+功能完整、测试充分(已知缺陷全部修复;两运行时 67 项测试全绿)。**结构性重构主体已完成**:已抽出
 `Core.psm1`(git 原语)与 `Merge.psm1`(事务引擎),三条命令成为同一引擎上的薄壳并去除了命令间耦合;
 后续的环境模块合并与 git 安全加固按路线图推进中。
 
 ## 版本历史
 
-> 当前版本:**v5.5.0**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
+> 当前版本:**v5.6.0**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
 
 **v5.x —— 模块化、引擎统一与持续加固(当前)**
+- **v5.6.0** —— git 安全加固:经统一 `Invoke-GitCommand` 的每次 git 调用现都运行于非交互、长路径安全的配置下 —— `GIT_TERMINAL_PROMPT=0`(凭据提示时快速失败而非挂起)、`GIT_EDITOR=true`(绝不弹出编辑器)、`-c core.longpaths=true`(Windows 长路径安全)、`-c rerere.enabled=false`(已记录的冲突解决绝不会悄悄自动解决我们的一次性集成合并)。两个环境变量捕获后恢复,无全局副作用。
 - **v5.5.0** —— 仓库整理:入口命令(`gitmerge`/`gitsync`/`gitstatus`)留在顶层,所有 `GitMergeTools.*.psm1` 模块移入 `Modules/` 子文件夹(PowerShell 约定)。加载器优先查找 `Modules/`,同时仍兼容扁平布局,既有安装不受影响。
 - **v5.4.0** —— 架构瘦身(反过度设计):**把 `max` 顶档并入 `rich` 并删除该档**(原 `max` 只是 rich 的重打标签,truecolor/OSC 效果作为镀金砍掉);`GITMERGE_VISUAL_MODE=max` 保留为 `rich` 的兼容别名。视觉档位精简为 `rich/standard/basic`。
 - **v5.3.1** —— 修复升级建议:当环境已达最优(`max` + PowerShell 7)时**不再弹出任何升级建议**;建议仅在**显式固定的档位未达成**时出现,且指出**具体缺失的能力项**(原先以 `rich` 为基准,在更高的 `max` 档下误报为"未启用 rich")。

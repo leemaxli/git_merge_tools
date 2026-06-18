@@ -8,10 +8,6 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
 ## Backlog (leaned)
 
 ### Architecture slimming (deletion-driven; the merge engine + its safety tests are untouched)
-- **Fold `max` into `rich`; delete the tier.** Remove `GitMergeTools.Visual.Max.psm1`; drop `max` from the
-  candidate list; map a legacy `GITMERGE_VISUAL_MODE=max` to `rich` (compat alias); delete
-  `Test-GitMergeToolsMaxAvailable`, the advisory's `max` branch, and the MaxTier delegate tests. (`max` was
-  a 44-line re-tag of `rich` — zero functional loss; the truecolor/OSC effects are the cut eye-candy.)
 - **Fold `Common` + `Common.PowerShell7` + `Common.PowerShell51` into one `GitMergeTools.Environment.psm1`**
   (inline `$PSVersionTable` branching for the New-Object/::new() difference); delete the two runtime modules
   AND the now-redundant inline fallback in Common. Biggest dedup: the module-discovery cascade currently
@@ -21,12 +17,9 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
   three entry scripts. *(Optional, lower priority)* merge `Basic/Standard/Rich` into one `Visual.Renderers.psm1`.
 
 ### Git-safety hardening (cheap core only — hangs on Core's unified `Invoke-GitCommand`)
-- Non-interactive git profile — **just three cheap flags**: `GIT_TERMINAL_PROMPT=0`, `GIT_EDITOR=true`, and
-  `-c rerere.enabled=false` on the temp-worktree merges. A meta-test asserts they are applied.
 - In-progress-op preflight: refuse when an affected worktree has `MERGE_HEAD` / `REBASE_HEAD` /
   `CHERRY_PICK_HEAD` / `REVERT_HEAD` (or `rebase-merge`/`rebase-apply` dirs), resolved per-worktree via
   `git rev-parse --git-path`. One regression test.
-- `-c core.longpaths=true` on the tool's own git calls (Windows long-path safety).
 - gitsync **structured result**: the engine returns its actual synchronized set and gitsync pushes exactly
   that — closes the skip/push divergence and removes the dead `-RemoteAlreadyFetched` param, the redundant
   `#10` double-compute, and the double-fetch. Regression test.
@@ -64,8 +57,15 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
   primitives) + `GitMergeTools.Merge.psm1` (the `Invoke-GitMergeConsolidation` transactional engine); all
   three commands are thin peers on one engine — **the `gitsync → gitmerge` call is gone**. A characterization
   net (`EngineTransaction.Tests.ps1`) locks the engine's safety invariants across the extraction.
+- **Architecture slimming (on main):** folded the `max` tier into `rich` and deleted it — `max` stays a
+  compatibility alias for `rich` (v5.4.0); moved all `GitMergeTools.*.psm1` modules into a `Modules/`
+  subfolder with the entry commands staying top-level (loaders prefer `Modules/`, flat layout still
+  tolerated) (v5.5.0).
 - **Git-safety hardening (done):** inherited `GIT_DIR`/`GIT_WORK_TREE`/… neutralization in the unified
-  `Invoke-GitCommand`; a meta-test that permanently forbids `git push --force`/`--force-with-lease`.
+  `Invoke-GitCommand`; a non-interactive, long-path-safe per-call profile (`GIT_TERMINAL_PROMPT=0`,
+  `GIT_EDITOR=true`, `-c core.longpaths=true`, `-c rerere.enabled=false`; the env vars are captured and
+  restored, so there is no global leak) (v5.6.0); a meta-test that permanently forbids
+  `git push --force`/`--force-with-lease`.
 - **Bug fixes (each red→green, both runtimes):** `#1` UTF-8 decode of git output (non-ASCII branch names
   survive cp936/GBK); `#2`-twin non-destructive `gitmerge` fetch; `#3` gitsync honors the `#10` skip in its
   push set; `#4` gitstatus doesn't fold stderr into porcelain; `#5` display-width-aware banner truncation;
@@ -76,4 +76,4 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
   BOM meta-test.
 - **Features:** capability-gated visual selection + upgrade advisory; display-width helpers.
 - **Tests:** dependency-free harness (no Pester), hermetic sandboxed repos + path-containment guard,
-  smoke/characterization/safety suites, a cross-runtime driver. **64 passing on both runtimes.**
+  smoke/characterization/safety suites, a cross-runtime driver. **67 passing on both runtimes.**
