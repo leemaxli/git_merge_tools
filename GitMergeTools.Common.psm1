@@ -286,15 +286,22 @@ function Write-GitMergeToolsRecommendationSummary {
 
     if (Test-GitMergeToolsSuppressWarning) { return }
 
-    $needsSummary = (-not $RuntimeState.IsPowerShell7 -or $VisualLevel -ne 'rich' -or @($Reasons).Count -gt 0)
-    if (-not $needsSummary) { return }
+    # Auto visual selection already picks the highest tier the environment can render, so a successfully
+    # selected tier is never something to "upgrade" toward — stay silent about tiers (this is why the
+    # optimal max/rich case prints nothing). A shortfall against an EXPLICITLY PINNED tier is reported
+    # separately, with the specific blocking capability, by Write-GitMergeToolsUpgradeAdvisory. The only
+    # things worth surfacing here are: the runtime isn't the preferred PowerShell 7, or no renderer loaded.
+    $rendererFailed = ($VisualLevel -eq 'none')
+    if ($RuntimeState.IsPowerShell7 -and -not $rendererFailed) { return }
 
     Write-Warning "GitMergeTools recommendation summary for $CommandName"
     Write-Host ("  Runtime                  : {0} {1}" -f $RuntimeState.PowerShellEdition, $RuntimeState.PowerShellVersion) -ForegroundColor Yellow
     Write-Host ("  Visual level             : {0}" -f $VisualLevel) -ForegroundColor Yellow
-    foreach ($reason in @($Reasons)) {
-        if (-not [string]::IsNullOrWhiteSpace($reason)) {
-            Write-Host "  Reason                   : $reason" -ForegroundColor Yellow
+    if ($rendererFailed) {
+        foreach ($reason in @($Reasons)) {
+            if (-not [string]::IsNullOrWhiteSpace($reason)) {
+                Write-Host "  Reason                   : $reason" -ForegroundColor Yellow
+            }
         }
     }
     if (-not $RuntimeState.IsPowerShell7) {
@@ -304,13 +311,6 @@ function Write-GitMergeToolsRecommendationSummary {
         else {
             Write-Host '  Recommendation           : install PowerShell 7+ so the preferred runtime is available.' -ForegroundColor Yellow
         }
-    }
-    if ($RuntimeState.IsPowerShell7 -and -not $RuntimeState.PowerShell51Available) {
-        Write-Host '  Fallback note            : Windows PowerShell 5.1 was not found; PowerShell 7 is active.' -ForegroundColor Yellow
-    }
-    if ($VisualLevel -ne 'rich') {
-        Write-Host '  Recommendation           : use PowerShell 7+, UTF-8 input/output, and a Unicode-capable terminal for rich visuals.' -ForegroundColor Yellow
-        Write-Host "  Visual preference         : unset `$env:GITMERGE_VISUAL_MODE for auto, or set it to rich, standard, or basic." -ForegroundColor Yellow
     }
     Write-Host "  Suppress notice           : `$env:GITMERGE_TOOLS_SUPPRESS_WARNING='1'" -ForegroundColor DarkGray
 }
