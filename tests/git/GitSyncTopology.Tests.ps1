@@ -259,3 +259,48 @@ Test-Case 'gitsync cross-all (mesh): all branches converge to one union; every o
         }
     } finally { Remove-GitSandbox $ctx.Sandbox }
 }
+
+# ---------------------------------------------------------------------------
+# Test 6: all (star) -- the HUB (current, non-main) has a conflicting origin
+# diverge -> ABORT (ACTION NEEDED), hub ref unchanged, nothing pushed.
+# The hub is not skippable in a star topology; a doomed push is not acceptable.
+# ---------------------------------------------------------------------------
+Test-Case 'gitsync all: non-main hub with conflicting origin diverge aborts; hub ref unchanged; nothing pushed' {
+    $ctx = New-BareOriginSandbox
+    try {
+        # feature/hub will be the hub (current branch).
+        # Make origin/feature/hub and local feature/hub diverge on the same file (conflict).
+        New-SandboxBranch -Sandbox $ctx.Sandbox -Name 'feature/hub' -StartPoint 'refs/heads/main'
+        Invoke-SandboxGit $ctx.Sandbox.Repo @('switch', 'feature/hub') | Out-Null
+        # Push origin side first.
+        $null = New-SandboxCommit -Sandbox $ctx.Sandbox -FileName 'shared.txt' -Content "origin side`n" -Message 'hub origin'
+        Invoke-SandboxGit $ctx.Sandbox.Repo @('push', 'origin', 'feature/hub') | Out-Null
+        # Reset local to base, then make a conflicting local commit.
+        $baseRef = Get-SandboxRef -Sandbox $ctx.Sandbox -Ref 'refs/heads/main'
+        Invoke-SandboxGit $ctx.Sandbox.Repo @('reset', '--hard', $baseRef) | Out-Null
+        $null = New-SandboxCommit -Sandbox $ctx.Sandbox -FileName 'shared.txt' -Content "local side`n" -Message 'hub local'
+        $hubLocalTip = Get-SandboxRef -Sandbox $ctx.Sandbox -Ref 'refs/heads/feature/hub'
+        $hubOriginTip = Get-OriginRef -ctx $ctx -Branch 'feature/hub'
+
+        # Add a clean spoke so we confirm it also stays untouched (abort = nothing changes).
+        New-SandboxBranch -Sandbox $ctx.Sandbox -Name 'spoke' -StartPoint 'refs/heads/main'
+        Invoke-SandboxGit $ctx.Sandbox.Repo @('push', 'origin', 'spoke') | Out-Null
+        $spokeTip = Get-SandboxRef -Sandbox $ctx.Sandbox -Ref 'refs/heads/spoke'
+
+        # feature/hub is still current (we haven't switched away).
+        $ok = Invoke-ProductCommand -Script 'gitsync.ps1' -Func 'gitsync' -Arg 'all' -Sandbox $ctx.Sandbox
+        Assert-False $ok 'gitsync all must abort (return false) when the non-main hub has a conflicting origin diverge'
+
+        # Hub local ref must be unchanged.
+        $hubLocalAfter = Get-SandboxRef -Sandbox $ctx.Sandbox -Ref 'refs/heads/feature/hub'
+        Assert-Equal $hubLocalTip $hubLocalAfter -Message 'hub (feature/hub) local ref must be unchanged after abort'
+
+        # Nothing pushed: origin/feature/hub still has the original "origin side" tip.
+        $hubOriginAfter = Get-OriginRef -ctx $ctx -Branch 'feature/hub'
+        Assert-Equal $hubOriginTip $hubOriginAfter -Message 'origin/feature/hub must be unchanged (abort before push)'
+
+        # spoke origin also untouched.
+        $spokeOriginAfter = Get-OriginRef -ctx $ctx -Branch 'spoke'
+        Assert-Equal $spokeTip $spokeOriginAfter -Message 'origin/spoke must be unchanged (abort before push)'
+    } finally { Remove-GitSandbox $ctx.Sandbox }
+}

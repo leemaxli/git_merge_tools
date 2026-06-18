@@ -1,19 +1,30 @@
 ﻿<#
 .SYNOPSIS
-    Transactionally consolidates local branches through main, then pushes the
-    updated main and synchronized branches to origin.
+    Safely pulls each involved origin/<branch>, runs the same per-mode topology
+    as gitmerge, then pushes each converged branch to its own origin/<branch>.
 .DESCRIPTION
-    gitsync runs the shared transactional consolidation engine for the local
-    merge/synchronization phase (the same engine gitmerge uses) — no separate
-    gitmerge call. Before local refs are changed, it verifies that origin exists
-    and that remote target branches do not contain commits missing from their
-    local branches. After consolidation succeeds, it pushes main and the selected
-    target branches with a single atomic ordinary push.
+    gitsync runs the shared transactional consolidation engine directly (no
+    separate gitmerge call). It supports the same three topologies as gitmerge:
+
+      (default / <branch>) 2-branch: current branch <-> named branch (or main).
+      all                  Star:     current branch is the hub; all others are spokes.
+      cross-all            Mesh:     every local managed branch converges with every other.
+
+    Before changing any local ref, gitsync fetches origin and classifies each
+    involved branch: safe (up-to-date, fast-forwardable, or cleanly diverged) or
+    unsafe (conflicting diverge, or diverged with a dirty worktree). Unsafe main
+    or an unsafe hub (in 'all' mode) aborts the entire run — nothing is changed.
+    Unsafe non-hub spokes in all/cross-all are skipped and the rest proceed.
+
+    After local consolidation succeeds, each converged branch is pushed to its
+    own origin/<branch> with a single-ref ordinary push (never forced). A push
+    rejected by origin is reported and skipped; other branches are still pushed.
 .PARAMETER BranchName
-    Empty selects the current branch. all or cross-all selects every local
-    branch, including main/master.
-    debug reports the plan without changing refs, worktrees, or remotes.
-    Any other value selects one local branch.
+    Empty (default): consolidate current branch with main.
+    all:             star topology — current branch is the hub.
+    cross-all:       mesh topology — all managed local branches.
+    debug:           report the plan without changing refs, worktrees, or remotes.
+    Any other value: 2-branch consolidation of current branch with the named branch.
 #>
 function gitsync {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
@@ -432,9 +443,11 @@ function gitsync {
     }
     if ($needManual.Count -gt 0) {
         $mainUnsafe = @($needManual | Where-Object { $_.Branch -ceq $mainBranch })
-        # MAIN unsafe, or a single explicitly-selected branch is unsafe -> ABORT, change nothing. (With
-        # all/cross-all there are other branches to proceed with, so non-main targets are skipped instead.)
-        if ($mainUnsafe.Count -gt 0 -or $mode -notin @('all','cross-all')) {
+        # HUB unsafe (all mode): current branch is the star hub -- it is never skippable.
+        $hubUnsafe = ($mode -eq 'all') -and (@($needManual | Where-Object { $_.Branch -ceq $currentBranch }).Count -gt 0)
+        # MAIN unsafe, HUB unsafe, or a single explicitly-selected branch is unsafe -> ABORT, change nothing.
+        # (With all/cross-all there are other branches to proceed with, so non-main/non-hub targets are skipped.)
+        if ($mainUnsafe.Count -gt 0 -or $hubUnsafe -or $mode -notin @('all','cross-all')) {
             Write-Stage -Title 'ACTION NEEDED' -Subtitle 'origin has updates that cannot be safely auto-pulled; nothing was changed' -StageIcon 'REMOTE' -Color Yellow
             foreach ($entry in $needManual) { Write-StatusLine -Marker '!' -Message $entry.Message -Color Yellow }
             Write-StatusLine -Marker 'i' -Message 'Nothing was changed. Resolve the above, then re-run gitsync.' -Color DarkGray
