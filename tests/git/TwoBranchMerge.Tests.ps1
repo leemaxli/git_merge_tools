@@ -107,3 +107,32 @@ Test-Case 'gitmerge {branch} fast-forwards current up to an ahead X (X not check
         Assert-Equal $bTip (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-b') -Message 'branch-b is unchanged (already the union)'
     } finally { Remove-GitSandbox $sb }
 }
+
+# F1 all-or-nothing: X checked out in a dirty extra worktree -> preflight re-check fires -> both unchanged.
+Test-Case 'gitmerge {branch} refuses when X is checked out in another worktree and dirty; both unchanged' {
+    $sb = New-GitSandbox
+    try {
+        $base = New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base'
+        New-SandboxBranch -Sandbox $sb -Name 'branch-a' -StartPoint $base
+        New-SandboxBranch -Sandbox $sb -Name 'branch-b' -StartPoint $base
+        Invoke-SandboxGit $sb.Repo @('switch', 'branch-b') | Out-Null
+        $bTip = New-SandboxCommit -Sandbox $sb -FileName 'b.txt' -Content "b`n" -Message 'b work'
+        Invoke-SandboxGit $sb.Repo @('switch', 'branch-a') | Out-Null
+        $aTip = New-SandboxCommit -Sandbox $sb -FileName 'a.txt' -Content "a`n" -Message 'a work'
+        # check out branch-b in a SEPARATE worktree and dirty it
+        $wtB = Join-Path $sb.Root 'wt-b'
+        Invoke-SandboxGit $sb.Repo @('worktree', 'add', $wtB, 'branch-b') | Out-Null
+        Set-Content -LiteralPath (Join-Path $wtB 'b.txt') -Value "dirty`n" -Encoding utf8
+
+        $ok = Invoke-ProductCommand -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'branch-b' -Sandbox $sb
+        Assert-False $ok 'gitmerge must refuse when X (branch-b) is checked out dirty elsewhere'
+        Assert-Equal $aTip (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-a') -Message 'branch-a unchanged'
+        Assert-Equal $bTip (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-b') -Message 'branch-b unchanged'
+    } finally {
+        $wtB = Join-Path $sb.Root 'wt-b'
+        if (Test-Path -LiteralPath $wtB) {
+            Invoke-SandboxGit $sb.Repo @('worktree', 'remove', '--force', $wtB) | Out-Null
+        }
+        Remove-GitSandbox $sb
+    }
+}

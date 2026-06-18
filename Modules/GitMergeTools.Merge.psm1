@@ -100,7 +100,8 @@ function Move-BranchRefSafely {
         [Parameter(Mandatory)][string]$Repository,
         [Parameter(Mandatory)][string]$Branch,
         [Parameter(Mandatory)][string]$ExpectedOldHash,
-        [Parameter(Mandatory)][string]$NewHash
+        [Parameter(Mandatory)][string]$NewHash,
+        [string]$Message = 'gitsync: sync from origin'
     )
 
     if ($ExpectedOldHash -eq $NewHash) { return $true }   # already there; nothing to do
@@ -108,7 +109,7 @@ function Move-BranchRefSafely {
         return $false   # not a fast-forward of the decided-on tip -> never move sideways
     }
     $update = Invoke-GitCommand $Repository @(
-        'update-ref', '-m', 'gitsync: sync from origin', "refs/heads/$Branch", $NewHash, $ExpectedOldHash
+        'update-ref', '-m', $Message, "refs/heads/$Branch", $NewHash, $ExpectedOldHash
     ) -MergeError
     return ($update.ExitCode -eq 0)   # CAS: fails (no change) if the ref moved off ExpectedOldHash
 }
@@ -900,29 +901,12 @@ function Invoke-TwoBranchMerge {
     }
     Write-StatusLine -Marker 'i' -Message 'Affected worktrees are clean.' -Color Green
 
-    # Sub-branch skip guard (mirrors the #10 guard in Invoke-GitMergeConsolidation): if X has an
-    # unmerged descendant branch not in our target set, skip X with a warning rather than silently
-    # consolidating a branch whose children would be left behind.
-    $allLocalBranches = @(Get-LocalBranch $repository | Where-Object {
-        -not $_.StartsWith('gitmerge-tmp-', [System.StringComparison]::Ordinal)
-    })
-    $targetSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-    [void]$targetSet.Add($current)
-    [void]$targetSet.Add($X)
-    $xDescendants = @($allLocalBranches | Where-Object {
-        $_ -cne $X -and -not $targetSet.Contains($_) -and
-        (Test-Ancestor -Repository $repository -Ancestor "refs/heads/$X" -Descendant "refs/heads/$_")
-    })
-    if ($xDescendants.Count -gt 0) {
-        $RunState.SkippedBranches.Add($X)
-        Write-StatusLine -Marker 'x' -Message "Skipping '$X': unmerged descendant branch(es): $($xDescendants -join ', '). Merge them back into '$X' (or select them too / use 'all') to include its work." -Color Yellow
-        $RunState.Result = 'SUCCESS'
-        $RunState.MainBranch = $current
-        $RunState.MainPublished = 'NOT REQUIRED'
-        return $true
-    }
-
     # Step 7: Capture old tips.
+    # NOTE: The #10 sub-branch skip guard is intentionally ABSENT here. In the 2-branch path,
+    # advancing X to the union is a pure fast-forward — it loses no work from any descendant of X.
+    # Descendants simply stay where they are (untouched) with all their commits intact.
+    # The #10 guard remains in Invoke-GitMergeConsolidation (used by all/cross-all/gitsync) where
+    # it protects against silently consolidating mid-flight work through main.
     $curOld = Get-RefHash $repository "refs/heads/$current"
     $xOld = Get-RefHash $repository "refs/heads/$X"
     if (-not $curOld -or -not $xOld) {
@@ -1000,7 +984,38 @@ function Invoke-TwoBranchMerge {
         }
 
         # Step 12: Apply — fast-forward both real refs to unionTip.
-        Write-Stage -Title 'PUBLISH' -Subtitle "Fast-forward '$current' and '$X' to the union" -StageIcon 'PUSH'
+        # Order: X first, then current. If X's FF fails, current is still untouched (all-or-nothing).
+        # current is the caller's checked-out branch in the clean repo; its FF is near-certain to succeed.
+        Write-Stage -Title 'PUBLISH' -Subtitle "Fast-forward '$X' then '$current' to the union" -StageIcon 'PUSH'
+
+        # Fast-forward X (use worktree ff-only if checked out, else CAS update-ref).
+        $xApplyOk = $false
+        if ($null -ne $xWt) {
+            # Re-check X's cleanliness immediately before touching it (mirrors the re-check on current).
+            if (-not (Test-CleanWorktree $xWt)) {
+                $RunState.FailureReason = "The '$X' worktree changed after preflight."
+                Write-Warning $RunState.FailureReason
+                return $false
+            }
+            $xApply = Invoke-GitCommand $xWt.Path @('merge', '--ff-only', $unionTip) -MergeError
+            $xApplyOk = ($xApply.ExitCode -eq 0)
+            if (-not $xApplyOk) {
+                Write-GitFailure "Cannot fast-forward '$X' to union" $xApply
+                $RunState.FailureReason = "Cannot fast-forward '$X' to the union."
+                Write-Warning $RunState.FailureReason
+                return $false
+            }
+        }
+        else {
+            $xApplyOk = Move-BranchRefSafely -Repository $repository -Branch $X -ExpectedOldHash $xOld -NewHash $unionTip -Message "gitmerge: converge with '$current'"
+            if (-not $xApplyOk) {
+                $RunState.FailureReason = "Cannot advance '$X' to the union (CAS failed — concurrent change?)."
+                Write-Warning $RunState.FailureReason
+                return $false
+            }
+        }
+        Write-StatusLine -Marker 'i' -Message "Fast-forwarded '$X' to the union." -Color Green
+        $RunState.SynchronizedBranches.Add($X)
 
         # Fast-forward current (it is checked out in curWt or we use update-ref CAS).
         $curApplyOk = $false
@@ -1021,7 +1036,7 @@ function Invoke-TwoBranchMerge {
             }
         }
         else {
-            $curApplyOk = Move-BranchRefSafely -Repository $repository -Branch $current -ExpectedOldHash $curOld -NewHash $unionTip
+            $curApplyOk = Move-BranchRefSafely -Repository $repository -Branch $current -ExpectedOldHash $curOld -NewHash $unionTip -Message "gitmerge: converge with '$X'"
             if (-not $curApplyOk) {
                 $RunState.FailureReason = "Cannot advance '$current' to the union (CAS failed — concurrent change?)."
                 Write-Warning $RunState.FailureReason
@@ -1030,29 +1045,6 @@ function Invoke-TwoBranchMerge {
         }
         Write-StatusLine -Marker 'i' -Message "Fast-forwarded '$current' to the union." -Color Green
         $RunState.IntegratedBranches.Add($current)
-
-        # Fast-forward X (use worktree ff-only if checked out, else CAS update-ref).
-        $xApplyOk = $false
-        if ($null -ne $xWt) {
-            $xApply = Invoke-GitCommand $xWt.Path @('merge', '--ff-only', $unionTip) -MergeError
-            $xApplyOk = ($xApply.ExitCode -eq 0)
-            if (-not $xApplyOk) {
-                Write-GitFailure "Cannot fast-forward '$X' to union" $xApply
-                $RunState.FailureReason = "Cannot fast-forward '$X' to the union."
-                Write-Warning $RunState.FailureReason
-                return $false
-            }
-        }
-        else {
-            $xApplyOk = Move-BranchRefSafely -Repository $repository -Branch $X -ExpectedOldHash $xOld -NewHash $unionTip
-            if (-not $xApplyOk) {
-                $RunState.FailureReason = "Cannot advance '$X' to the union (CAS failed — concurrent change?)."
-                Write-Warning $RunState.FailureReason
-                return $false
-            }
-        }
-        Write-StatusLine -Marker 'i' -Message "Fast-forwarded '$X' to the union." -Color Green
-        $RunState.SynchronizedBranches.Add($X)
 
         # Step 13: Record success.
         $RunState.Result = 'SUCCESS'
