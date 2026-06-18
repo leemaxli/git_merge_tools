@@ -1,55 +1,89 @@
 # TODO / Roadmap
 
 Status of GitMergeTools. Below the line is **done and tested** (green on PowerShell 7 and Windows
-PowerShell 5.1); above it is the **leaned** backlog after the 2026-06-18 anti-over-engineering review —
-roughly half the prior backlog was enterprise gold-plating for a solo-maintained, 3-command tool and has
-been cut or deferred. What remains is the cheap, high-value core plus deletion-driven simplification.
+PowerShell 5.1); above it is the **leaned** backlog. The backlog has survived three anti-over-engineering
+passes (the latest, 2026-06-18, was a code-grounded multi-agent review: 10 candidate items, only 2 cheap
+safety-characterization tests survived adversarial verification). The merge engine (`Merge.psm1`) and git
+primitives (`Core.psm1`) are lean and load-bearing; all remaining work is either a HARD-CONSTRAINT
+regression-lock or deletion-driven simplification in the discovery / visual-plumbing layer.
 
 ## Backlog (leaned)
 
-### Architecture slimming (deletion-driven; the merge engine + its safety tests are untouched)
+### Safety regression-locks (highest value; test-only, no production change)
+- **`gitsync push --atomic` meta-scan** — a positive counterpart to `tests/meta/PushForceGuard.Tests.ps1`.
+  `gitsync.ps1`'s single `push --atomic origin <refspecs>` is the *entire* remote-write path, and `--atomic`
+  is the all-or-nothing guarantee that a multi-ref push can't partially clobber a collaborator. It has **zero
+  test coverage** today — the flag (or a split into per-branch pushes) could be removed without turning a
+  single test red. A cheap source-scan closes that silent-degradation hole. *(Do NOT build the runtime
+  rejection/race test — advancing origin pre-run trips the divergence preflight before the push is reached,
+  and the real fetch→push TOCTOU has no injection seam in the black-box harness.)*
+- **`Test-TemporaryWorktreeForCleanup` negative-case tests** (`Merge.psm1`) — this guard is the sole gate
+  before the tool's only destructive `git worktree remove --force`. Existing tests cover only the happy path;
+  the refusal arms (non-matching branch name, mismatched path, locked record, case-sensitive branch compare)
+  have no coverage, so a regression loosening the pattern/path check would be invisible yet could force-remove
+  a user-owned path. Add a unit test asserting `$false` for each refusal arm (the exported-helper unit-test
+  pattern already exists in `InProgressOpPreflight.Tests.ps1`). No production-code change.
+
+### Deletion-driven simplification (engine + safety tests untouched)
 - **Fold `Common` + `Common.PowerShell7` + `Common.PowerShell51` into one `GitMergeTools.Environment.psm1`**
-  (inline `$PSVersionTable` branching for the New-Object/::new() difference); delete the two runtime modules
-  AND the now-redundant inline fallback in Common. Biggest dedup: the module-discovery cascade currently
-  exists in **6 copies** (Common + PS7/51 + the three entry scripts).
-- **Single-directory discovery**: collapse to `$PSScriptRoot -> Split-Path $PSCommandPath -> $GITMERGE_TOOLS_HOME`
-  (already used by the Core import); delete the XDG/.config/Documents/MyDocuments/OneDrive ladder in all
-  three entry scripts. *(Optional, lower priority)* merge `Basic/Standard/Rich` into one `Visual.Renderers.psm1`.
+  (inline `$PSVersionTable` branching for the `::new()`/`New-Object` one-liner); delete the two runtime
+  modules AND the now-redundant inline fallback in Common. The search-dir / runtime-state / rich-probe logic
+  exists in **triplicate** (Common delegates to PS7/51 *and* carries a third inline copy of the 9-entry
+  candidate ladder, reachable only if a sibling `Modules/*.psm1` is absent — which never happens, since they
+  ship together). ~150 lines and an entire dead load-path deleted, no behavior change.
+- **Single-directory discovery for the visual loader**: collapse the three near-verbatim
+  `New-OptionalGit{Merge,Sync,Status}Visual` functions (only the command-name string differs) to the same
+  `$PSScriptRoot -> Split-Path $PSCommandPath -> $GITMERGE_TOOLS_HOME` (Modules/ then flat) cascade the
+  Core/Merge preamble already uses; delete the XDG/.config/Documents/MyDocuments/OneDrive ladder (it is then
+  rebuilt a 2nd time inside Common to resolve renderers — the "6-copy cascade").
+- **Consolidate the suppress-warning env var to the single documented `GITMERGE_TOOLS_SUPPRESS_WARNING`**;
+  delete the undocumented `GITMERGE_VISUAL_SUPPRESS_WARNING` twin and the OR-of-two-names logic across the
+  4+ sites (Common + the three entry scripts + Visual.Common). README documents only the `_TOOLS_` name, so
+  the twin is dead duplication with no deprecation concern. **Keep the `_TOOLS_` name** — do NOT rename to a
+  bare `GITMERGE_SUPPRESS_WARNING` (that would break the published variable).
 
-### Git-safety hardening (cheap core only — hangs on Core's unified `Invoke-GitCommand`)
-- gitsync structured result — **safe subset done (v5.10.0):** gitsync now pushes exactly the engine's
-  reported synchronized set and the dead `-RemoteAlreadyFetched` param is gone. **Deferred (full version):**
-  removing gitsync's own preflight `#10` skip (a rare edge-case behavior change) and the double-fetch.
-- `--` option terminator before user refs in plumbing calls — **marginal:** refs are already fully-qualified
-  `refs/heads/...`, so the injection surface is near-zero. Likely descope.
-
-### Visual polish (cheap wins)
-- Consolidate to a single `GITMERGE_SUPPRESS_WARNING` (pick one name, delete the others — solo tool, no
-  deprecation layer). Delete the legacy visual-mode aliases outright. *(Optional)* a read-only `check`
-  keyword.
-
-### P4 — verification
-- Encoding/i18n edge tests: non-ASCII branch names (done — `Utf8BranchCapture`) and Unicode/space repo
-  paths (done — `I18nRepoPath`, v5.9.0) guard the cp936/GBK Windows dev env. **Remaining:** a non-English
-  `LANG`/`LC_ALL` test (the tools already key on exit codes + `--porcelain`, so this only pins that
-  convention against regression).
+## Deferred (real but low priority — leave as notes, don't build now)
+- **Full gitsync structured-result cleanup**: the data-safety subset shipped (v5.10.0 — gitsync pushes the
+  engine's `SynchronizedBranches` verbatim). What remains is one redundant fetch round-trip (the preflight
+  fetch is genuinely needed before local refs change) and gitsync's own `#10` skip (now redundant for the
+  push set but still shaping the dry-run preview + preflight loop). Not a correctness/safety driver.
+- **Delete the truly-undocumented visual-mode aliases** (`a`/`b`/`c`, `full`/`emoji`/`current`/`enhanced`/
+  `fallback`/`plain`) — trivially deletable, but **keep `max`** (documented in README.en as the rich compat
+  alias, pinned by `MaxFoldedToRich.Tests.ps1`; deleting it is a real if minor breaking change). Low value.
+- **Non-English `LANG`/`LC_ALL` regression test** — can only pin the existing exit-code/`--porcelain`
+  convention against regression (the tools deliberately never parse localized text); it cannot surface a real
+  defect today. Cheap and plausibly justified by the cp936/GBK dev locale, but not a current bug.
 
 ## Descoped — over-engineered for a solo 3-command tool (deliberately NOT building)
-- **`max` raw-ANSI/OSC effects** (truecolor gradients, OSC 8 / OSC 9;4, rounded panels): the only
-  control-byte-emitting code path in the whole tool, pure eye-candy. The `max` tier itself is folded into `rich`.
+- **`--` option terminator before user refs**: defends a threat that cannot occur — every ref is passed
+  fully-qualified `refs/heads/<x>` built from git's own branch enumeration (#6), never raw user input, never
+  a value that could start with `-`. Injection surface is effectively zero.
+- **Read-only `check` keyword**: no gap to close — read-only inspection is already `gitstatus`, and
+  `gitmerge debug` / `gitsync debug` are full dry-run plans (no ref/worktree/remote mutation). A third way to
+  do the same thing only adds parsing surface.
+- **Merge `Basic/Standard/Rich` into one `Visual.Renderers.psm1`**: cosmetic file-count reduction, not real
+  dedup — the three renderers' bodies differ substantially per tier (ASCII vs box-drawing vs glyphs/color);
+  merging removes no shared logic and forces a large churn diff on visually-sensitive, hard-to-test code.
+- **`max` raw-ANSI/OSC truecolor effects** (gradients, OSC 8 / OSC 9;4, rounded panels): the only
+  control-byte-emitting path; pure eye-candy. The `max` tier itself is folded into `rich`.
 - **gitsync concurrency classification + two-process race meta-test**: the compare-and-swap `update-ref`
   already makes concurrent runs safe; this only rewords an outcome a solo user won't hit.
-- **Startup reclamation of orphaned `gitmerge-tmp-*` worktrees** (descoped 2026-06-18, user decision):
-  orphans only occur on a crash mid-run; the normal cleanup covers every other path, and a startup sweep
-  risks removing a *concurrent* run's active temp worktree (the compare-and-swap makes concurrent runs
-  otherwise safe). Not worth the concurrency-classification machinery for a solo tool.
-- **Kitchen-sink non-interactive profile** beyond the 3 cheap flags (transport timeouts, SSH BatchMode,
+- **Startup reclamation of orphaned `gitmerge-tmp-*` worktrees** (user decision, 2026-06-18): orphans only
+  occur on a crash; normal cleanup covers every other path, and a startup sweep risks removing a *concurrent*
+  run's active temp worktree. Not worth the concurrency-classification machinery for a solo tool.
+- **Kitchen-sink non-interactive profile** beyond the 3 shipped flags (transport timeouts, SSH BatchMode,
   color/quotepath/advice subset, `GIT_OPTIONAL_LOCKS`); **predictive MAX_PATH / ENOSPC `DriveInfo` prechecks**
-  (let git fail cleanly + the startup sweep handles the orphan); **ref NFC + `check-ref-format`** (refs come
-  from git's own enumeration); **refuse-LFS/submodule/sparse gate** (first *prove* it corrupts main's tree
-  with one characterization test, then decide — don't pre-build the gate); **byte-consistency test** (only
-  meaningful once raw-ANSI exists, which it won't); **per-stage Stopwatch badges + recursive branch tree**;
-  **case-insensitive ref-collision gate**.
+  (let git fail cleanly); **ref NFC + `check-ref-format`** (refs come from git's own enumeration);
+  **byte-consistency test** (only meaningful once raw-ANSI exists, which it won't); **per-stage Stopwatch
+  badges + recursive branch tree**; **case-insensitive ref-collision gate**.
+- **refuse-LFS/submodule/sparse/shallow gate**: stays descoped UNTIL a failing characterization test *proves*
+  tree corruption through the throwaway-worktree merge — do not pre-build the gate.
+
+> Why the descoped block is correct: the HARD CONSTRAINT is met *by construction* — the engine only runs
+> `worktree add` / `merge` / `merge --abort` / `merge --ff-only` / `update-ref` / `worktree remove`, and
+> publishes via compare-and-swap `update-ref` + `merge --ff-only` + `push --atomic`. It never runs
+> `add`/`checkout`/`reset`/`commit -a`/`rm`. Every descoped item is enterprise defense against a threat this
+> design already prevents.
 
 ---
 
