@@ -33,7 +33,7 @@ function Invoke-SandboxGit {
     if ($psi.PSObject.Properties['ArgumentList']) {
         foreach ($a in $all) { [void]$psi.ArgumentList.Add($a) }
     } else {
-        # Windows PowerShell 5.1 / .NET Framework: no ArgumentList — build a quoted string.
+        # Windows PowerShell 5.1 / .NET Framework: no ArgumentList -- build a quoted string.
         $psi.Arguments = ($all | ForEach-Object {
             if ($_ -match '[\s"]') { '"' + ($_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"' } else { $_ }
         }) -join ' '
@@ -72,7 +72,7 @@ function New-GitSandbox {
     New-Item -ItemType Directory -Path $repo -Force | Out-Null
     $script:Sandboxes.Add($root)
 
-    # Hermetic git environment (spec §21). Process-scoped env; each test sets these before git runs.
+    # Hermetic git environment (spec section 21). Process-scoped env; each test sets these before git runs.
     $env:HOME = $homeDir
     if (Test-IsWindowsRuntime) { $env:USERPROFILE = $homeDir }
     $env:XDG_CONFIG_HOME = (Join-Path $homeDir '.config')

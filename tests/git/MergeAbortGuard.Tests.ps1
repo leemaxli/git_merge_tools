@@ -1,7 +1,7 @@
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'smoke/Commands.Smoke.Tests.ps1.helper.ps1')
 
 # Defect #7: gitmerge called `git merge --abort` unconditionally on a merge failure. When the merge
-# fails BEFORE a merge state is created (e.g. "refusing to merge unrelated histories" — no MERGE_HEAD),
+# fails BEFORE a merge state is created (e.g. "refusing to merge unrelated histories" -- no MERGE_HEAD),
 # the abort itself errors ("no merge to abort") and emits a misleading warning that masks the real cause.
 Test-Case 'pre-merge failure (unrelated histories): main unchanged, no spurious merge --abort warning (#7)' {
     $sb = New-GitSandbox

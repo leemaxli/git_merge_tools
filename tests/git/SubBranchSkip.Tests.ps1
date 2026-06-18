@@ -1,7 +1,7 @@
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'smoke/Commands.Smoke.Tests.ps1.helper.ps1')
 
 # Feature #10: a selected target with an unmerged descendant ("sub-branch") not itself selected is
-# SKIPPED (not consolidated) with a clear warning — so its children's work is not silently left behind.
+# SKIPPED (not consolidated) with a clear warning -- so its children's work is not silently left behind.
 Test-Case 'gitmerge skips a target that has an unmerged descendant branch, and warns (#10)' {
     $sb = New-GitSandbox
     try {

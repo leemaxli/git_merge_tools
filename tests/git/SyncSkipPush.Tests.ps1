@@ -1,7 +1,7 @@
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'smoke/Commands.Smoke.Tests.ps1.helper.ps1')
 
 # #3: gitsync builds its push set independently of the engine, so it would push (and report as
-# "synced") a branch that gitmerge's #10 guard deliberately skipped — misreporting work that never
+# "synced") a branch that gitmerge's #10 guard deliberately skipped -- misreporting work that never
 # entered main. gitsync must honor the same unmerged-descendant skip.
 Test-Case 'gitsync does not push a branch the engine skips for an unmerged descendant (#3 / #10 consistency)' {
     $sb = New-GitSandbox

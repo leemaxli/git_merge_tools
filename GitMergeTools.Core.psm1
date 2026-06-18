@@ -20,7 +20,7 @@
 )]
 param()
 
-# GitMergeTools.Core.psm1 — the single source of truth for the git primitives that gitmerge / gitsync /
+# GitMergeTools.Core.psm1 -- the single source of truth for the git primitives that gitmerge / gitsync /
 # gitstatus all consume (previously copy-pasted and drifted across the three entry scripts). No UI beyond
 # the Write-GitFailure diagnostic; no merge-engine logic (that lives in the command / future Merge module).
 

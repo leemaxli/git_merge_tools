@@ -46,7 +46,7 @@ Test-Case 'gitmerge integrates a diverged (non-fast-forward) branch via a merge 
         Assert-Equal 0 (Invoke-SandboxGit $sb.Repo @('merge-base', '--is-ancestor', $mainTip, 'refs/heads/main')).ExitCode -Message 'new main must descend from old main'
         Assert-Equal 0 (Invoke-SandboxGit $sb.Repo @('merge-base', '--is-ancestor', $featTip, 'refs/heads/main')).ExitCode -Message 'new main must descend from the feature tip (work integrated)'
         # Consolidation: the target branch is fast-forwarded UP to the integrated main (ancestor-guarded,
-        # never force-moved/rewound — the old tip remains an ancestor, no work is lost).
+        # never force-moved/rewound -- the old tip remains an ancestor, no work is lost).
         Assert-Equal $newMain (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/feature/x') -Message 'feature/x is fast-forwarded to the integrated main'
         Assert-Equal 0 (Invoke-SandboxGit $sb.Repo @('merge-base', '--is-ancestor', $featTip, 'refs/heads/feature/x')).ExitCode -Message 'feature/x only advanced (old tip is an ancestor); it was never force-moved'
     } finally { Remove-GitSandbox $sb }

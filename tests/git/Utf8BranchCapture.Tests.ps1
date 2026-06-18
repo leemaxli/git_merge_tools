@@ -2,7 +2,7 @@
 
 # #1: git output must be decoded as UTF-8 regardless of the console code page. On a redirected stdout
 # (agent pipe / non-tty) the console falls back to the system ANSI code page (cp936/GBK here), so a
-# non-ASCII branch name read back from git mojibakes — and `merge refs/heads/<mojibake>` then targets
+# non-ASCII branch name read back from git mojibakes -- and `merge refs/heads/<mojibake>` then targets
 # the wrong (or no) ref. `gitmerge all` must still integrate a branch whose name is non-ASCII.
 Test-Case 'gitmerge all integrates a non-ASCII (CJK) branch name (#1 UTF-8 capture)' {
     $sb = New-GitSandbox
