@@ -2,7 +2,7 @@
 
 [:cn: 简体中文](README.md) · :us: **English**
 
-**Current version v6.7.1** · see [Version history](#version-history) below
+**Current version v6.8.0** · see [Version history](#version-history) below
 
 Cross-platform PowerShell helpers for **safe, transactional** local Git branch consolidation —
 with an auto-degrading, capability-aware visual layer. Runs on **PowerShell 7+** (preferred) and
@@ -106,10 +106,12 @@ cross-command coupling; the remaining environment-module merge and git-safety ha
 
 ## Version history
 
-> Current version: **v6.7.1**. Early v1–v3 predate Git tracking and are a summarized retrospective;
+> Current version: **v6.8.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
 > from v4 on, the history follows the Git commit log.
+> Old-history trimming: versions more than 5 majors back keep only their major (`.0`) line (at v6.x, v1 keeps just v1.0).
 
 **v6.x — Remote sync: pull, not just push (current)**
+- **v6.8.0** — All three commands' run summaries now show 10 recent commits (was 5); `gitsync`'s summary gains a "recent commits" block it previously lacked.
 - **v6.7.1** — Test-only: safety regression-locks for the two most dangerous operations — a meta-scan pinning gitsync's `push --atomic` (and that gitmerge/gitstatus/engine never push), and negative-case tests for `Test-TemporaryWorktreeForCleanup`, the gate before the only `git worktree remove --force`.
 - **v6.7.0** — Skip-and-proceed (gitsync): with `all`/`cross-all`, `gitsync` now **skips** a non-main branch that can't be safely pulled (dirty worktree, or a conflicting divergence) and syncs the rest, instead of aborting the whole run. The skipped branch is excluded from the pull, the consolidation, **and** the push (never force-pushed) and is left untouched. A single explicitly-selected branch, or an unsafe `main`, still stops with `ACTION NEEDED`.
 - **v6.6.0** — Skip-and-proceed (engine): `gitmerge`/`gitsync` with `all`/`cross-all` no longer abort the whole run when a *non-main* target branch's worktree can't safely participate (dirty, or mid-merge/rebase/cherry-pick/revert) — that branch is **skipped with a warning** and the rest still consolidate (consistent with the `#10` sub-branch skip). A dirty or in-progress **main** worktree still aborts, since everything is consolidated through main.
@@ -144,8 +146,7 @@ cross-command coupling; the remaining environment-module merge and git-safety ha
 - **v2.0** — Added `gitsync` and `gitpush` alongside `gitmerge` (atomic push; later folded into `gitsync`).
 
 **v1.x — Genesis (retrospective, pre-Git)**
-- **v1.1** — Transactional temporary-worktree integration; `--ff-only` advancement.
-- **v1.0** — The first `gitmerge`: a single script consolidating local branches through `main`.
+- **v1.0** — The first `gitmerge`: a single script consolidating local branches through `main` (transactional temporary-worktree integration, `--ff-only` advancement).
 
 ## License
 
