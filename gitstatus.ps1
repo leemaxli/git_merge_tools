@@ -370,7 +370,7 @@ function gitstatus {
         foreach ($branch in $targetBranches) {
             $snapshot = Get-BranchSnapshot -Repository $repository -Branch $branch -MainBranch $mainBranch -Worktrees $worktrees
             $snapshots.Add($snapshot)
-            Write-BranchSnapshot -Snapshot $snapshot -ShowComparison ($mode -eq 'all')
+            Write-BranchSnapshot -Snapshot $snapshot -ShowComparison ($mode -in @('all', 'cross-all'))
         }
 
         Write-StatusSummary -Result 'SUCCESS' -Mode $mode -Repository $repository -MainBranch $mainBranch -Snapshots $snapshots.ToArray() -Elapsed ((Get-Date) - $startedAt)
