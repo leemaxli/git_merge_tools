@@ -1,30 +1,31 @@
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'smoke/Commands.Smoke.Tests.ps1.helper.ps1')
 
-# skip-and-proceed (user decision 2026-06-18): with all/cross-all, a TARGET branch whose worktree can't
-# safely participate (dirty / mid-operation) is SKIPPED with a warning -- the rest still consolidate --
-# consistent with the #10 sub-branch skip. MAIN unsafe still ABORTS (everything routes through main).
+# skip-and-proceed (v7.1 star engine): with all, a SPOKE branch whose worktree is dirty is SKIPPED with
+# a warning -- the rest still merge. The HUB (current branch) being dirty ABORTS the run. These tests
+# exercise both cases under the v7.1 star semantics.
 
-Test-Case 'gitmerge all skips a dirty non-main target and still consolidates the clean one' {
+Test-Case 'gitmerge all (v7.1 star): dirty HUB (current branch) aborts; spokes untouched' {
+    # v7.1: hub = current branch. Hub dirty => abort, nothing changes.
     $sb = New-GitSandbox
     try {
         $c1 = New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base'
         New-SandboxBranch -Sandbox $sb -Name 'feature/clean' -StartPoint $c1
         Invoke-SandboxGit $sb.Repo @('switch', 'feature/clean') | Out-Null
-        $cClean = New-SandboxCommit -Sandbox $sb -FileName 'a.txt' -Content "clean work`n" -Message 'clean work'  # ahead of main
-        New-SandboxBranch -Sandbox $sb -Name 'feature/dirty' -StartPoint $c1
-        Invoke-SandboxGit $sb.Repo @('switch', 'feature/dirty') | Out-Null                # current = feature/dirty
-        Set-Content -LiteralPath (Join-Path $sb.Repo 'f.txt') -Value "dirty edit`n" -Encoding utf8  # dirty worktree
-        # main is NOT checked out (current is feature/dirty); feature/clean is NOT checked out.
+        $cClean = New-SandboxCommit -Sandbox $sb -FileName 'a.txt' -Content "clean work`n" -Message 'clean work'
+        New-SandboxBranch -Sandbox $sb -Name 'feature/dirty-hub' -StartPoint $c1
+        Invoke-SandboxGit $sb.Repo @('switch', 'feature/dirty-hub') | Out-Null   # HUB = feature/dirty-hub
+        Set-Content -LiteralPath (Join-Path $sb.Repo 'f.txt') -Value "dirty`n" -Encoding utf8
+        $hubBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/feature/dirty-hub'
+        $cleanBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/feature/clean'
 
         $ok = Invoke-ProductCommand -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'all' -Sandbox $sb
-        Assert-True $ok 'gitmerge all should skip the dirty branch and consolidate the clean one'
-        $anc = Invoke-SandboxGit $sb.Repo @('merge-base', '--is-ancestor', $cClean, 'refs/heads/main')
-        Assert-Equal 0 $anc.ExitCode -Message "the clean branch's work must be consolidated into main"
-        Assert-Equal $c1 (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/feature/dirty') -Message 'the dirty branch must be untouched (skipped)'
+        Assert-False $ok 'gitmerge all must abort when the HUB (current) worktree is dirty'
+        Assert-Equal $hubBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/feature/dirty-hub') -Message 'dirty hub branch must be untouched'
+        Assert-Equal $cleanBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/feature/clean') -Message 'clean spoke must also be untouched (aborted)'
     } finally { Remove-GitSandbox $sb }
 }
 
-Test-Case 'gitmerge all still ABORTS when MAIN itself is the dirty worktree (main is the integration point)' {
+Test-Case 'gitmerge all still ABORTS when MAIN is checked out as HUB and its worktree is dirty' {
     $sb = New-GitSandbox
     try {
         $c1 = New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base'
@@ -36,7 +37,7 @@ Test-Case 'gitmerge all still ABORTS when MAIN itself is the dirty worktree (mai
         $mainBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main'
 
         $ok = Invoke-ProductCommand -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'all' -Sandbox $sb
-        Assert-False $ok 'gitmerge must still abort when MAIN''s own worktree is dirty'
-        Assert-Equal $mainBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main') -Message 'main must be unchanged when its worktree is dirty'
+        Assert-False $ok 'gitmerge must abort when the current (hub) branch worktree is dirty'
+        Assert-Equal $mainBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main') -Message 'hub must be unchanged when its worktree is dirty'
     } finally { Remove-GitSandbox $sb }
 }

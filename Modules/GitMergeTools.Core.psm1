@@ -245,7 +245,7 @@ function Get-Mode {
     switch ($Name) {
         { [string]::IsNullOrWhiteSpace($_) } { 'current'; break }
         'all' { 'all'; break }
-        'cross-all' { 'all'; break }
+        'cross-all' { 'cross-all'; break }
         'debug' { 'debug'; break }
         default { 'single' }
     }

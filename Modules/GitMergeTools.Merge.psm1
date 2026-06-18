@@ -1071,6 +1071,396 @@ function Invoke-TwoBranchMerge {
     }
 }
 
+function Invoke-StarMerge {
+    # v7.1 star engine: current branch T is the hub; every other managed branch is a spoke.
+    # PASS 1: classify each spoke (skip if worktree dirty or conflicts with originalT).
+    # PASS 2a: build the hub union in a throwaway (skip spokes that conflict with accumulator).
+    # PASS 2b: apply -- advance hub to union; reverse-merge originalT into each clean spoke.
+    # Safety: all real-ref moves are FF (merge --ff-only) or Move-BranchRefSafely CAS or
+    # commit-tree-derived CAS. Hub union built/validated in throwaway before any real ref moves.
+    # Conflicts skip (merge --abort, no partial state). finally-cleanup always runs.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Interactive, colorized engine output.')]
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]$RunState,
+        $Visual
+    )
+
+    function Write-Stage {
+        param([string]$Title, [string]$Subtitle, [string]$StageIcon, [ConsoleColor]$Color = [ConsoleColor]::Cyan)
+        if ($null -ne $Visual) {
+            & $Visual.WriteStage -Title $Title -Subtitle $Subtitle -StageIcon $StageIcon -Color $Color
+            return
+        }
+        Write-Host ''
+        Write-Host '----------------------------------------------------------' -ForegroundColor DarkGray
+        Write-Host "  $Title" -ForegroundColor $Color
+        if (-not [string]::IsNullOrWhiteSpace($Subtitle)) {
+            Write-Host "  $Subtitle" -ForegroundColor DarkGray
+        }
+        Write-Host '----------------------------------------------------------' -ForegroundColor DarkGray
+    }
+
+    function Write-StatusLine {
+        param([string]$Marker, [string]$Message, [ConsoleColor]$Color = [ConsoleColor]::Gray)
+        if ($null -ne $Visual) {
+            & $Visual.WriteStatusLine -Marker $Marker -Message $Message -Color $Color
+            return
+        }
+        Write-Host ("   {0,-3} {1}" -f $Marker, $Message) -ForegroundColor $Color
+    }
+
+    # Step 1: Resolve repository.
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        $RunState.FailureReason = 'Git is not installed or is not available on PATH.'
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+    $rootResult = Invoke-GitCommand '' @('rev-parse', '--show-toplevel') -SuppressError
+    if ($rootResult.ExitCode -ne 0) {
+        $RunState.FailureReason = 'Current directory is not inside a Git repository.'
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+    $repository = Get-FirstOutputLine $rootResult
+    $RunState.Repository = $repository
+    $RunState.SummaryEnabled = $true
+
+    Write-Stage -Title 'PREFLIGHT' -Subtitle 'Resolve repository, hub branch, and spokes' -StageIcon 'SCAN'
+    Write-StatusLine -Marker 'i' -Message "Git root: $repository" -Color Green
+
+    # Must have at least one commit.
+    $headResult = Invoke-GitCommand $repository @('rev-parse', '--verify', 'HEAD') -SuppressError
+    if ($headResult.ExitCode -ne 0) {
+        $RunState.FailureReason = 'Repository has no commits yet. Create an initial commit before running gitmerge.'
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+
+    # Hub T = current branch (detached HEAD aborts).
+    $T = Get-CurrentBranch $repository
+    if ([string]::IsNullOrWhiteSpace($T)) {
+        $RunState.FailureReason = 'Current HEAD is detached; checkout a branch before running gitmerge all.'
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+    $RunState.MainBranch = $T
+    Write-StatusLine -Marker 'i' -Message "Hub (current): $T" -Color Green
+
+    # Enumerate managed branches: local branches minus temp branches.
+    $allLocal = Get-LocalBranch $repository
+    if ($null -eq $allLocal) {
+        $RunState.FailureReason = 'Cannot enumerate local branches.'
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+    $managed = @($allLocal | Where-Object { $_ -notmatch '^gitmerge-tmp-' })
+    $others = @($managed | Where-Object { $_ -ne $T })
+    $RunState.LocalBranchCount = $managed.Count
+
+    if ($others.Count -eq 0) {
+        Write-StatusLine -Marker 'i' -Message "No other branches; nothing to merge." -Color DarkGray
+        $RunState.Result = 'SUCCESS'
+        $RunState.MainPublished = 'NOT REQUIRED'
+        return $true
+    }
+    Write-StatusLine -Marker 'i' -Message "Spokes ($($others.Count)): $($others -join ', ')" -Color Green
+    foreach ($b in $others) { [void]$RunState.TargetBranches.Add($b) }
+
+    # Step 3: Get worktrees; preflight the HUB.
+    $worktrees = Get-WorktreeRecord $repository
+    if ($null -eq $worktrees) {
+        $RunState.FailureReason = 'Git worktrees could not be enumerated.'
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+    $worktrees = @($worktrees)
+    $RunState.WorktreeCount = $worktrees.Count
+    $curWt = Find-BranchWorktree $worktrees $T
+
+    # Hub dirty => abort entire run (hub failure is not skip-and-proceed).
+    if ($null -ne $curWt -and -not (Test-CleanWorktree $curWt)) {
+        $RunState.FailureReason = "No refs were changed because the '$T' hub worktree is not clean."
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+    Write-StatusLine -Marker 'i' -Message "Hub worktree clean." -Color Green
+
+    # Step 4: Capture originalT tip (never changes during this run's logic).
+    $originalT = Get-RefHash $repository "refs/heads/$T"
+    if (-not $originalT) {
+        $RunState.FailureReason = "Cannot resolve hub tip hash for '$T'."
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+    Write-StatusLine -Marker 'i' -Message "Hub original tip: $($originalT.Substring(0,8))..." -Color Green
+
+    # Step 5: PASS 1 -- classify spokes (read-only, mutate nothing).
+    Write-Stage -Title 'CLASSIFY SPOKES' -Subtitle 'Identify clean spokes vs. skip (dirty worktree / conflicts with hub)' -StageIcon 'SCAN'
+    $candidates = [System.Collections.Generic.List[object]]::new()
+    foreach ($B in $others) {
+        $bWt = Find-BranchWorktree $worktrees $B
+        if ($null -ne $bWt -and -not (Test-CleanWorktree $bWt)) {
+            [void]$RunState.SkippedBranches.Add($B)
+            Write-StatusLine -Marker '!' -Message "Skip '$B': worktree not clean." -Color Yellow
+            Write-Warning "Skipping '$B': its worktree is not clean."
+            continue
+        }
+        # Probe merge of originalT + B in-memory (no worktree, no ref change).
+        $mtResult = Invoke-GitCommand $repository @('merge-tree', '--write-tree', $originalT, "refs/heads/$B") -MergeError
+        if ($mtResult.ExitCode -ne 0) {
+            [void]$RunState.SkippedBranches.Add($B)
+            Write-StatusLine -Marker '!' -Message "Skip '$B': conflicts with hub baseline." -Color Yellow
+            Write-Warning "Skipping '$B': conflicts with the hub baseline (merge-tree exit $($mtResult.ExitCode))."
+            continue
+        }
+        $spokeMergeTree = Get-FirstOutputLine $mtResult
+        $bOld = Get-RefHash $repository "refs/heads/$B"
+        [void]$candidates.Add([pscustomobject]@{ Branch = $B; Worktree = $bWt; Old = $bOld; Tree = $spokeMergeTree })
+        Write-StatusLine -Marker 'i' -Message "Candidate spoke: '$B' (tip $($bOld.Substring(0,8))...)" -Color Green
+    }
+
+    # Declare throwaway vars before the try block so the finally can always reference them.
+    $temporaryBranch = $null
+    $temporaryWorktree = $null
+
+    if ($candidates.Count -eq 0) {
+        Write-StatusLine -Marker 'i' -Message 'All spokes skipped; nothing to merge into hub.' -Color Yellow
+        $RunState.Result = 'SUCCESS'
+        $RunState.MainPublished = 'NOT REQUIRED'
+        $RunState.CleanupStatus = 'CLEAN'
+        return $true
+    }
+
+    # Step 6: PASS 2a -- build hub accumulator in a throwaway.
+    $suffix = $null
+    do {
+        $suffix = [guid]::NewGuid().ToString('N')
+        $temporaryBranch = "gitmerge-tmp-$suffix"
+    } while (Test-LocalBranch $repository $temporaryBranch)
+    $temporaryWorktree = Join-Path ([System.IO.Path]::GetTempPath()) $temporaryBranch
+
+    try {
+        Write-Stage -Title 'BUILD HUB UNION' -Subtitle "Merge spokes into throwaway at hub '$T' (real refs untouched)" -StageIcon 'MERGE'
+        Write-StatusLine -Marker '->' -Message "Creating temporary branch '$temporaryBranch' at '$T'." -Color Cyan
+        $create = Invoke-GitCommand $repository @(
+            'worktree', 'add', '-b', $temporaryBranch, $temporaryWorktree, "refs/heads/$T"
+        ) -MergeError
+        if ($create.ExitCode -ne 0) {
+            Write-GitFailure 'Cannot create the temporary merge worktree' $create
+            $RunState.FailureReason = 'Cannot create the temporary merge worktree.'
+            return $false
+        }
+        Write-StatusLine -Marker 'i' -Message "Temporary worktree: $temporaryWorktree" -Color Green
+
+        $hubMergedB = [System.Collections.Generic.List[object]]::new()
+        foreach ($c in $candidates) {
+            $merge = Invoke-GitCommand $temporaryWorktree @(
+                'merge', '--no-edit', '-m', "Merge '$($c.Branch)' into '$T'", "refs/heads/$($c.Branch)"
+            ) -MergeError
+            if ($merge.ExitCode -ne 0) {
+                # Sibling/accumulator conflict -- skip ENTIRELY (no reverse merge either).
+                $mergeInProgress = (Invoke-GitCommand $temporaryWorktree @('rev-parse', '--verify', '-q', 'MERGE_HEAD') -SuppressError).ExitCode -eq 0
+                if ($mergeInProgress) {
+                    [void](Invoke-GitCommand $temporaryWorktree @('merge', '--abort') -MergeError)
+                }
+                [void]$RunState.SkippedBranches.Add($c.Branch)
+                Write-StatusLine -Marker '!' -Message "Skip '$($c.Branch)': conflicts with another branch already merged into the hub." -Color Yellow
+                Write-Warning "Skipping '$($c.Branch)': conflicts with another branch already merged into the hub."
+                continue
+            }
+            [void]$hubMergedB.Add($c)
+            Write-StatusLine -Marker 'i' -Message "Merged '$($c.Branch)' into throwaway hub." -Color Green
+        }
+
+        # Hub union tip.
+        $hubUnion = Get-RefHash $repository "refs/heads/$temporaryBranch"
+        if (-not $hubUnion) {
+            $RunState.FailureReason = 'Cannot resolve hub union tip after throwaway merges.'
+            Write-Warning $RunState.FailureReason
+            return $false
+        }
+        # Sanity: union descends originalT.
+        if (-not (Test-Ancestor -Repository $repository -Ancestor $originalT -Descendant "refs/heads/$temporaryBranch")) {
+            $RunState.FailureReason = "Hub union does not descend hub original tip -- internal sanity check failed."
+            Write-Warning $RunState.FailureReason
+            return $false
+        }
+        Write-StatusLine -Marker 'i' -Message "Hub union tip: $($hubUnion.Substring(0,8))..." -Color Green
+
+        # Step 7: PASS 2b -- staleness re-check then apply real refs.
+        Write-Stage -Title 'APPLY' -Subtitle 'Advance hub to union; reverse-merge originalT into each spoke' -StageIcon 'PUSH'
+
+        # Staleness re-check (concurrency guard).
+        $tNow = Get-RefHash $repository "refs/heads/$T"
+        if ($tNow -ne $originalT) {
+            $RunState.FailureReason = "Hub '$T' changed during the merge; refusing to publish a stale result."
+            Write-Warning $RunState.FailureReason
+            return $false
+        }
+
+        # Drop any candidate whose ref moved concurrently.
+        $applyList = [System.Collections.Generic.List[object]]::new()
+        foreach ($c in $hubMergedB) {
+            $bNow = Get-RefHash $repository "refs/heads/$($c.Branch)"
+            if ($bNow -ne $c.Old) {
+                Write-StatusLine -Marker '!' -Message "Drop '$($c.Branch)' from apply: concurrent change detected." -Color Yellow
+                Write-Warning "Skipping '$($c.Branch)': it changed concurrently; not applying reverse merge."
+                [void]$RunState.SkippedBranches.Add($c.Branch)
+            }
+            else {
+                [void]$applyList.Add($c)
+            }
+        }
+
+        # 7a: Advance hub T to hubUnion.
+        if ($hubUnion -eq $originalT) {
+            Write-StatusLine -Marker 'i' -Message "Hub already current; nothing absorbed." -Color DarkGray
+        }
+        else {
+            $hubAdvanceOk = $false
+            if ($null -ne $curWt) {
+                # Re-check cleanliness immediately before touching it.
+                if (-not (Test-CleanWorktree $curWt)) {
+                    $RunState.FailureReason = "Hub '$T' worktree changed after preflight."
+                    Write-Warning $RunState.FailureReason
+                    return $false
+                }
+                $hubApply = Invoke-GitCommand $curWt.Path @('merge', '--ff-only', $hubUnion) -MergeError
+                $hubAdvanceOk = ($hubApply.ExitCode -eq 0)
+                if (-not $hubAdvanceOk) {
+                    Write-GitFailure "Cannot fast-forward hub '$T' to union" $hubApply
+                    $RunState.FailureReason = "Cannot fast-forward hub '$T' to the union."
+                    Write-Warning $RunState.FailureReason
+                    return $false
+                }
+            }
+            else {
+                $hubAdvanceOk = Move-BranchRefSafely -Repository $repository -Branch $T -ExpectedOldHash $originalT -NewHash $hubUnion -Message "gitmerge: star -- advance hub '$T' to union"
+                if (-not $hubAdvanceOk) {
+                    $RunState.FailureReason = "Cannot advance hub '$T' to union (CAS failed -- concurrent change?)."
+                    Write-Warning $RunState.FailureReason
+                    return $false
+                }
+            }
+            Write-StatusLine -Marker 'i' -Message "Hub '$T' advanced to union." -Color Green
+            [void]$RunState.IntegratedBranches.Add($T)
+        }
+
+        # 7b: Reverse-merge originalT into each spoke (skip-and-proceed per branch).
+        foreach ($c in $applyList) {
+            $B = $c.Branch
+            $bOld = $c.Old
+
+            # Case 1: B already contains originalT (originalT is ancestor of B).
+            if (Test-Ancestor -Repository $repository -Ancestor $originalT -Descendant "refs/heads/$B") {
+                Write-StatusLine -Marker 'i' -Message "Spoke '$B' already contains hub original; no reverse merge needed." -Color DarkGray
+                [void]$RunState.SynchronizedBranches.Add($B)
+                continue
+            }
+
+            # Case 2: B is ancestor of originalT => fast-forward B to originalT.
+            if (Test-Ancestor -Repository $repository -Ancestor "refs/heads/$B" -Descendant $originalT) {
+                $ffOk = $false
+                if ($null -ne $c.Worktree) {
+                    if (-not (Test-CleanWorktree $c.Worktree)) {
+                        Write-StatusLine -Marker '!' -Message "Skip reverse-merge for '$B': worktree not clean (post-pass1 change)." -Color Yellow
+                        Write-Warning "Skipping reverse merge for '$B': worktree changed after Pass 1."
+                        [void]$RunState.SkippedBranches.Add($B)
+                        continue
+                    }
+                    $ffApply = Invoke-GitCommand $c.Worktree.Path @('merge', '--ff-only', $originalT) -MergeError
+                    $ffOk = ($ffApply.ExitCode -eq 0)
+                }
+                else {
+                    $ffOk = Move-BranchRefSafely -Repository $repository -Branch $B -ExpectedOldHash $bOld -NewHash $originalT -Message "gitmerge: star -- fast-forward spoke '$B' to hub original"
+                }
+                if (-not $ffOk) {
+                    Write-StatusLine -Marker '!' -Message "Skip '$B': cannot fast-forward to hub original." -Color Yellow
+                    Write-Warning "Skipping '$B': fast-forward to hub original failed."
+                    [void]$RunState.SkippedBranches.Add($B)
+                    continue
+                }
+                Write-StatusLine -Marker 'i' -Message "Spoke '$B' fast-forwarded to hub original." -Color Green
+                [void]$RunState.SynchronizedBranches.Add($B)
+                continue
+            }
+
+            # Case 3: Diverged -- build the merge commit worktree-free (using Pass-1 validated tree).
+            # The tree was validated by merge-tree(originalT, B) in Pass 1 => clean.
+            # commit-tree: parents = bOld (spoke's old tip), originalT. The result descends bOld => CAS ok.
+            if ($null -ne $c.Worktree) {
+                # Spoke is checked out: do a real merge in its worktree.
+                if (-not (Test-CleanWorktree $c.Worktree)) {
+                    Write-StatusLine -Marker '!' -Message "Skip reverse-merge for '$B': worktree not clean (post-pass1 change)." -Color Yellow
+                    Write-Warning "Skipping reverse merge for '$B': worktree changed after Pass 1."
+                    [void]$RunState.SkippedBranches.Add($B)
+                    continue
+                }
+                $wMerge = Invoke-GitCommand $c.Worktree.Path @('merge', '--no-edit', $originalT) -MergeError
+                if ($wMerge.ExitCode -ne 0) {
+                    # Surprise conflict (should not happen after clean merge-tree, but guard anyway).
+                    $mergeInProgress = (Invoke-GitCommand $c.Worktree.Path @('rev-parse', '--verify', '-q', 'MERGE_HEAD') -SuppressError).ExitCode -eq 0
+                    if ($mergeInProgress) {
+                        [void](Invoke-GitCommand $c.Worktree.Path @('merge', '--abort') -MergeError)
+                    }
+                    Write-StatusLine -Marker '!' -Message "Skip '$B': surprise conflict during worktree reverse merge." -Color Yellow
+                    Write-Warning "Skipping '$B': surprise conflict during reverse merge in its worktree."
+                    [void]$RunState.SkippedBranches.Add($B)
+                    continue
+                }
+                Write-StatusLine -Marker 'i' -Message "Spoke '$B' reverse-merged (worktree) with hub original." -Color Green
+                [void]$RunState.SynchronizedBranches.Add($B)
+            }
+            else {
+                # Spoke is NOT checked out: worktree-free commit-tree path (mirror gitsync.ps1:435-446).
+                $commitMsg = "Merge '$T' (original) into '$B'"
+                $commitResult = Invoke-GitCommand $repository @(
+                    'commit-tree', $c.Tree, '-p', $bOld, '-p', $originalT, '-m', $commitMsg
+                ) -MergeError
+                if ($commitResult.ExitCode -ne 0) {
+                    Write-GitFailure "Cannot create reverse-merge commit for '$B'" $commitResult
+                    Write-StatusLine -Marker '!' -Message "Skip '$B': commit-tree for reverse merge failed." -Color Yellow
+                    [void]$RunState.SkippedBranches.Add($B)
+                    continue
+                }
+                $mergeCommit = Get-FirstOutputLine $commitResult
+                $casOk = Move-BranchRefSafely -Repository $repository -Branch $B -ExpectedOldHash $bOld -NewHash $mergeCommit -Message "gitmerge: star -- reverse-merge hub original into spoke '$B'"
+                if (-not $casOk) {
+                    Write-StatusLine -Marker '!' -Message "Skip '$B': CAS failed for reverse merge (concurrent change?)." -Color Yellow
+                    Write-Warning "Skipping '$B': CAS for reverse merge failed (concurrent change?)."
+                    [void]$RunState.SkippedBranches.Add($B)
+                    continue
+                }
+                Write-StatusLine -Marker 'i' -Message "Spoke '$B' reverse-merged (worktree-free) with hub original." -Color Green
+                [void]$RunState.SynchronizedBranches.Add($B)
+            }
+        }
+
+        # Step 8: Record success.
+        $RunState.Result = 'SUCCESS'
+        $RunState.MainPublished = 'NOT REQUIRED'
+        Write-StatusLine -Marker 'i' -Message "Star merge complete. Hub='$T'; synchronized $($RunState.SynchronizedBranches.Count) spoke(s); skipped $($RunState.SkippedBranches.Count)." -Color Green
+        return $true
+    }
+    finally {
+        Write-Stage -Title 'CLEANUP' -Subtitle 'Remove temporary worktree and branch' -StageIcon 'CLEAN'
+        $cleanupOk = Invoke-TemporaryCleanup -Repository $repository -WorktreePath $temporaryWorktree -TemporaryBranch $temporaryBranch
+        $RunState.CleanupStatus = if ($cleanupOk) { 'CLEAN' } else { 'FAILED' }
+        if ($cleanupOk) {
+            Write-StatusLine -Marker 'i' -Message 'Temporary merge state removed.' -Color Green
+        }
+        else {
+            Write-StatusLine -Marker 'x' -Message 'Temporary cleanup was incomplete.' -Color Red
+            if ([string]::IsNullOrWhiteSpace($RunState.FailureReason)) {
+                $RunState.FailureReason = 'Temporary cleanup was incomplete.'
+            }
+            $RunState.Result = 'FAILED'
+        }
+    }
+}
+
 Export-ModuleMember -Function @(
     'Get-WorktreeInProgressOperation',
     'Get-RemoteBranchSyncState',
@@ -1082,5 +1472,6 @@ Export-ModuleMember -Function @(
     'Sync-MainFromOrigin',
     'Invoke-BranchFastForward',
     'Invoke-GitMergeConsolidation',
-    'Invoke-TwoBranchMerge'
+    'Invoke-TwoBranchMerge',
+    'Invoke-StarMerge'
 )

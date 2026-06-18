@@ -5,7 +5,9 @@
 # red. Together with Safety.Tests (conflict->no-change/no-leak, dirty->refuse, clean-FF->branch-kept)
 # they cover: all-or-nothing, non-FF merge integration, caller-HEAD invariance, post-success cleanup.
 
-Test-Case 'gitmerge all is all-or-nothing: one conflicting target leaves main and ALL branches unchanged' {
+Test-Case 'gitmerge all (v7.1 star): conflicting spoke is skipped; clean spoke merges; no leak' {
+    # v7.1 BREAKING: all is now skip-and-proceed (star), not all-or-nothing.
+    # hub=main absorbs the clean spoke; conflicting spoke is skipped (untouched); no ref leaks.
     $sb = New-GitSandbox
     try {
         $base = New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base'
@@ -20,10 +22,17 @@ Test-Case 'gitmerge all is all-or-nothing: one conflicting target leaves main an
 
         $mainBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main'
         $ok = Invoke-ProductCommand -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'all' -Sandbox $sb
-        Assert-False $ok 'gitmerge all must fail if any target conflicts'
-        Assert-Equal $mainBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main') -Message 'main must be unchanged (all-or-nothing): the good branch must not partially land'
-        Assert-Equal $goodTip (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/feature/good') -Message 'the good branch ref must be untouched'
-        Assert-Equal $badTip (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/feature/bad') -Message 'the bad branch ref must be untouched'
+        # v7.1: skip-and-proceed => SUCCESS (the clean spoke merged; bad spoke skipped).
+        Assert-True $ok 'gitmerge all (v7.1 star) succeeds with skip-and-proceed even when one spoke conflicts'
+        # Hub (main) advanced: must contain the good spoke's work.
+        $mainAfter = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main'
+        Assert-False ($mainAfter -eq $mainBefore) 'main must advance (absorbs the clean spoke)'
+        Assert-Equal 0 (Invoke-SandboxGit $sb.Repo @('merge-base', '--is-ancestor', $goodTip, 'refs/heads/main')).ExitCode -Message 'hub must contain the clean spoke work'
+        # Bad (conflicting) spoke: left entirely untouched.
+        Assert-Equal $badTip (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/feature/bad') -Message 'conflicting spoke must be untouched'
+        # Hub must NOT contain the bad spoke's conflicting change.
+        Assert-Equal 1 (Invoke-SandboxGit $sb.Repo @('merge-base', '--is-ancestor', $badTip, 'refs/heads/main')).ExitCode -Message 'hub must NOT absorb the conflicting spoke'
+        # No temp worktree leak.
         $wts = Invoke-SandboxGit $sb.Repo @('worktree', 'list', '--porcelain')
         Assert-False ((@($wts.Output) -join "`n") -match 'gitmerge-tmp-') 'no temp worktree may leak'
     } finally { Remove-GitSandbox $sb }
