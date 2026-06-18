@@ -375,6 +375,10 @@ function gitstatus {
         return $true
     }
     finally {
-        # No cleanup is required; gitstatus is read-only.
+        # No cleanup is required; gitstatus is read-only. Surface the visual upgrade advisory (no-op
+        # unless a tier was pinned but not reached, and not suppressed), consistent with gitmerge/gitsync.
+        if ($null -ne $visual -and -not [string]::IsNullOrWhiteSpace($repository) -and (Get-Command Write-GitMergeToolsUpgradeAdvisory -ErrorAction SilentlyContinue)) {
+            Write-GitMergeToolsUpgradeAdvisory -Visual $visual
+        }
     }
 }

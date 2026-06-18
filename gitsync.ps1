@@ -416,6 +416,11 @@ function gitsync {
     finally {
         if (-not [string]::IsNullOrWhiteSpace($repository)) {
             Write-SyncSummary -Result $syncResult -Mode $mode -Repository $repository -MainBranch $mainBranch -TargetBranches $targetBranches -PushBranches $pushBranches -PushedBranches $pushedBranches.ToArray() -FailureReason $failureReason -Elapsed ((Get-Date) - $startedAt)
+            # Surface the visual upgrade advisory (no-op unless a tier was pinned but not reached, and not
+            # suppressed), consistent with gitmerge so every command gives the same guidance.
+            if ($null -ne $visual -and (Get-Command Write-GitMergeToolsUpgradeAdvisory -ErrorAction SilentlyContinue)) {
+                Write-GitMergeToolsUpgradeAdvisory -Visual $visual
+            }
         }
     }
 }

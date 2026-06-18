@@ -2,7 +2,7 @@
 
 [:cn: 简体中文](README.md) · :us: **English**
 
-**Current version v5.7.0** · see [Version history](#version-history) below
+**Current version v5.8.0** · see [Version history](#version-history) below
 
 Cross-platform PowerShell helpers for **safe, transactional** local Git branch consolidation —
 with an auto-degrading, capability-aware visual layer. Runs on **PowerShell 7+** (preferred) and
@@ -94,17 +94,18 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # current runtime only
 
 ## Status
 
-Functional and fully tested (all known defects fixed; 70-test suite green on both runtimes). **The
+Functional and fully tested (all known defects fixed; 71-test suite green on both runtimes). **The
 core of the structural refactor is done**: `Core.psm1` (git primitives) and `Merge.psm1` (the
 transactional engine) are extracted, the three commands are thin peers on one engine with no
 cross-command coupling; the remaining environment-module merge and git-safety hardening are in progress.
 
 ## Version history
 
-> Current version: **v5.7.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
+> Current version: **v5.8.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
 > from v4 on, the history follows the Git commit log.
 
 **v5.x — Modularization, engine unification & ongoing hardening (current)**
+- **v5.8.0** — Consistency polish: `gitsync` and `gitstatus` now surface the same end-of-run visual upgrade advisory as `gitmerge` (silent unless you pinned a tier the environment can't render, and notices aren't suppressed).
 - **v5.7.0** — Git-safety preflight: the consolidation engine now refuses up front when an affected worktree is mid-operation (a merge / rebase / cherry-pick / revert), naming the operation instead of reporting a generic "uncommitted changes". Markers are resolved per-worktree via `git rev-parse --git-path`, so the check is correct for linked worktrees too.
 - **v5.6.0** — Git-safety hardening: every git call through the shared `Invoke-GitCommand` now runs under a non-interactive, long-path-safe profile — `GIT_TERMINAL_PROMPT=0` (fail fast instead of hanging on a credential prompt), `GIT_EDITOR=true` (never spawn an editor), `-c core.longpaths=true` (Windows long-path safety), and `-c rerere.enabled=false` (a recorded conflict resolution can never silently auto-resolve a throwaway integration merge). The env vars are captured and restored, so there is no global side effect.
 - **v5.5.0** — Repository tidy-up: the entry commands (`gitmerge`/`gitsync`/`gitstatus`) stay at the top level, while all `GitMergeTools.*.psm1` modules move into a `Modules/` subfolder (the PowerShell convention). The loaders prefer `Modules/` and still tolerate a flat layout, so existing installs keep working.

@@ -25,9 +25,9 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
   pattern verifier). macOS `/var`->`/private/var` realpath normalization only if/when actually run on macOS.
 
 ### Visual polish (cheap wins)
-- Wire the upgrade advisory into `gitsync`/`gitstatus`. Consolidate to a single `GITMERGE_SUPPRESS_WARNING`
-  (pick one name, delete the others — solo tool, no deprecation layer). Delete the legacy visual-mode
-  aliases outright. *(Optional)* a read-only `check` keyword.
+- Consolidate to a single `GITMERGE_SUPPRESS_WARNING` (pick one name, delete the others — solo tool, no
+  deprecation layer). Delete the legacy visual-mode aliases outright. *(Optional)* a read-only `check`
+  keyword.
 
 ### P4 — verification
 - Encoding/i18n edge tests (non-English `LANG`, non-ASCII branch names, Unicode/space repo paths) — these
@@ -73,6 +73,7 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
   qualified refs, `merge --abort` guard, `#10` sub-branch skip).
 - **Encoding hygiene:** all non-ASCII PowerShell sources are UTF-8-with-BOM (or pure-ASCII), guarded by a
   BOM meta-test.
-- **Features:** capability-gated visual selection + upgrade advisory; display-width helpers.
+- **Features:** capability-gated visual selection + upgrade advisory (surfaced by all three commands —
+  gitmerge/gitsync/gitstatus, v5.8.0); display-width helpers.
 - **Tests:** dependency-free harness (no Pester), hermetic sandboxed repos + path-containment guard,
-  smoke/characterization/safety suites, a cross-runtime driver. **70 passing on both runtimes.**
+  smoke/characterization/safety suites, a cross-runtime driver. **71 passing on both runtimes.**
