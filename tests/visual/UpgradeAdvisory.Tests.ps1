@@ -7,7 +7,7 @@ function New-AdvCap {
 }
 
 Test-Case 'advisory: suppressed => no lines' {
-    $lines = Get-GitMergeToolsUpgradeAdvisoryLines -AchievedTier 'basic' -RequestedMode 'max' -Capability (New-AdvCap) -Suppressed $true
+    $lines = Get-GitMergeToolsUpgradeAdvisoryLines -AchievedTier 'basic' -RequestedMode 'rich' -Capability (New-AdvCap) -Suppressed $true
     Assert-Equal 0 @($lines).Count -Message 'suppressed must produce no advisory'
 }
 
@@ -19,15 +19,6 @@ Test-Case 'advisory: auto requested => no nag even when only basic achieved' {
 Test-Case 'advisory: achieved tier meets requested => no lines' {
     $lines = Get-GitMergeToolsUpgradeAdvisoryLines -AchievedTier 'rich' -RequestedMode 'rich' -Capability (New-AdvCap) -Suppressed $false
     Assert-Equal 0 @($lines).Count -Message 'met request => no advisory'
-}
-
-Test-Case 'advisory: pinned max but only basic achieved => names both tiers + reasons' {
-    $lines = Get-GitMergeToolsUpgradeAdvisoryLines -AchievedTier 'basic' -RequestedMode 'max' -Capability (New-AdvCap -cl 1 -vt $false -u $true) -Suppressed $false
-    Assert-True (@($lines).Count -gt 0) -Message 'below-pin must advise'
-    $joined = @($lines) -join ' '
-    Assert-Match 'max' $joined -Message 'mentions requested max'
-    Assert-Match 'basic' $joined -Message 'mentions current basic'
-    Assert-Match 'truecolor' $joined -Message 'explains the missing truecolor for max'
 }
 
 Test-Case 'advisory: pinned rich but basic achieved (no UTF-8) => advises UTF-8' {

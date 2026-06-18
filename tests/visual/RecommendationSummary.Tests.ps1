@@ -26,10 +26,11 @@ function Invoke-RecSummary {
     }
 }
 
-# The reported bug: at the optimal max tier on PowerShell 7, there must be NO upgrade/recommendation noise.
-Test-Case 'recommendation summary is SILENT at the optimal max tier on PowerShell 7' {
-    $out = Invoke-RecSummary -RuntimeState (New-RtState -Ps7 $true) -VisualLevel 'max'
-    Assert-Equal '' ($out.Trim()) -Message 'optimal (max + PS7) must produce no recommendation/upgrade output at all'
+# The reported bug class: any successfully selected tier on PowerShell 7 must produce NO recommendation
+# noise (auto already picks the best renderable tier, so there is nothing to "upgrade" toward).
+Test-Case 'recommendation summary is SILENT for a successfully selected basic tier on PowerShell 7' {
+    $out = Invoke-RecSummary -RuntimeState (New-RtState -Ps7 $true) -VisualLevel 'basic'
+    Assert-Equal '' ($out.Trim()) -Message 'any successfully selected tier on PS7 must produce no recommendation output'
 }
 
 # Auto-selection always picks the best renderable tier, so ANY successful tier on PS7 is silent (no nag).

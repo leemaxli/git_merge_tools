@@ -2,7 +2,7 @@
 
 :cn: **简体中文** · [:us: English](README.en.md)
 
-**当前版本 v5.3.1** · 见下方[版本历史](#版本历史)
+**当前版本 v5.4.0** · 见下方[版本历史](#版本历史)
 
 跨平台 PowerShell 工具,用于**安全、事务式**地在本地把 Git 分支经 main 整合,并带一套按终端能力
 自动降级的视觉层。可运行于 **PowerShell 7+**(优先)与 **Windows PowerShell 5.1**,支持
@@ -52,8 +52,7 @@ Windows / Linux / macOS。
 
 | 档位 | 要求 | 外观 |
 |------|------|------|
-| `max` | truecolor + VT + UTF-8 输出,交互式(非重定向/CI),未设 `NO_COLOR` | 顶档(truecolor 效果) |
-| `rich` | UTF-8 输出 + Unicode 可渲染终端 | emoji + Unicode 框线 + 颜色 |
+| `rich` | UTF-8 输出 + Unicode 可渲染终端 | 最高档:emoji + Unicode 框线 + 颜色 |
 | `standard` | UTF-8 输出 | Unicode 框线,无 emoji |
 | `basic` | —— | 纯 ASCII,无色 |
 
@@ -61,7 +60,7 @@ Windows / Linux / macOS。
 
 | 变量 | 取值 | 含义 |
 |------|------|------|
-| `GITMERGE_VISUAL_MODE` | `auto`(默认) `\| max \| rich \| standard \| basic` | 固定视觉档位;仍做能力校验(达不到的档位会降级)。 |
+| `GITMERGE_VISUAL_MODE` | `auto`(默认) `\| rich \| standard \| basic` | 固定视觉档位;仍做能力校验(达不到的档位会降级)。(`max` 作为 `rich` 的兼容别名仍被接受。) |
 | `GITMERGE_TOOLS_SUPPRESS_WARNING` | 真值(`1`/`true`/`yes`/`on`) | 静默档位/升级提示。git 错误/警告始终输出。 |
 | `GITMERGE_TOOLS_HOME` | 路径 | 模块发现的安装目录覆盖。 |
 
@@ -85,9 +84,10 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # 仅当前运行时
 
 ## 版本历史
 
-> 当前版本:**v5.3.1**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
+> 当前版本:**v5.4.0**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
 
 **v5.x —— 模块化、引擎统一与持续加固(当前)**
+- **v5.4.0** —— 架构瘦身(反过度设计):**把 `max` 顶档并入 `rich` 并删除该档**(原 `max` 只是 rich 的重打标签,truecolor/OSC 效果作为镀金砍掉);`GITMERGE_VISUAL_MODE=max` 保留为 `rich` 的兼容别名。视觉档位精简为 `rich/standard/basic`。
 - **v5.3.1** —— 修复升级建议:当环境已达最优(`max` + PowerShell 7)时**不再弹出任何升级建议**;建议仅在**显式固定的档位未达成**时出现,且指出**具体缺失的能力项**(原先以 `rich` 为基准,在更高的 `max` 档下误报为"未启用 rich")。
 - **v5.3.0** —— git 安全加固开篇:在统一的 `Invoke-GitCommand` 里**中和继承的 `GIT_DIR`/`GIT_WORK_TREE`/…** 定位变量(捕获后清空、用后恢复),防止泄漏的环境变量把 git 指向错误仓库、绕过路径 containment 守护。
 - **v5.2.0** —— 抽出 `Merge.psm1` 事务引擎;`gitmerge`/`gitsync` 成为同一引擎上的薄壳,**移除 `gitsync → gitmerge` 调用**。
