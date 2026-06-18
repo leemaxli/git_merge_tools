@@ -17,12 +17,11 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
   three entry scripts. *(Optional, lower priority)* merge `Basic/Standard/Rich` into one `Visual.Renderers.psm1`.
 
 ### Git-safety hardening (cheap core only — hangs on Core's unified `Invoke-GitCommand`)
-- gitsync **structured result**: the engine returns its actual synchronized set and gitsync pushes exactly
-  that — closes the skip/push divergence and removes the dead `-RemoteAlreadyFetched` param, the redundant
-  `#10` double-compute, and the double-fetch. Regression test.
-- `--` option terminator before user refs in plumbing calls (cheap injection guard).
-- Startup idempotent reclamation of orphaned `gitmerge-tmp-*` worktrees (reuses the existing strict path+
-  pattern verifier). macOS `/var`->`/private/var` realpath normalization only if/when actually run on macOS.
+- gitsync structured result — **safe subset done (v5.10.0):** gitsync now pushes exactly the engine's
+  reported synchronized set and the dead `-RemoteAlreadyFetched` param is gone. **Deferred (full version):**
+  removing gitsync's own preflight `#10` skip (a rare edge-case behavior change) and the double-fetch.
+- `--` option terminator before user refs in plumbing calls — **marginal:** refs are already fully-qualified
+  `refs/heads/...`, so the injection surface is near-zero. Likely descope.
 
 ### Visual polish (cheap wins)
 - Consolidate to a single `GITMERGE_SUPPRESS_WARNING` (pick one name, delete the others — solo tool, no
@@ -40,6 +39,10 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
   control-byte-emitting code path in the whole tool, pure eye-candy. The `max` tier itself is folded into `rich`.
 - **gitsync concurrency classification + two-process race meta-test**: the compare-and-swap `update-ref`
   already makes concurrent runs safe; this only rewords an outcome a solo user won't hit.
+- **Startup reclamation of orphaned `gitmerge-tmp-*` worktrees** (descoped 2026-06-18, user decision):
+  orphans only occur on a crash mid-run; the normal cleanup covers every other path, and a startup sweep
+  risks removing a *concurrent* run's active temp worktree (the compare-and-swap makes concurrent runs
+  otherwise safe). Not worth the concurrency-classification machinery for a solo tool.
 - **Kitchen-sink non-interactive profile** beyond the 3 cheap flags (transport timeouts, SSH BatchMode,
   color/quotepath/advice subset, `GIT_OPTIONAL_LOCKS`); **predictive MAX_PATH / ENOSPC `DriveInfo` prechecks**
   (let git fail cleanly + the startup sweep handles the orphan); **ref NFC + `check-ref-format`** (refs come
@@ -65,8 +68,9 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
   `GIT_EDITOR=true`, `-c core.longpaths=true`, `-c rerere.enabled=false`; the env vars are captured and
   restored, so there is no global leak) (v5.6.0); an in-progress-op preflight that refuses an affected
   worktree mid-merge/rebase/cherry-pick/revert (markers resolved per-worktree via
-  `git rev-parse --git-path`) (v5.7.0); a meta-test that permanently forbids
-  `git push --force`/`--force-with-lease`.
+  `git rev-parse --git-path`) (v5.7.0); gitsync pushes exactly the engine's reported synchronized set
+  (single source of truth for the #10 skip) and the dead `-RemoteAlreadyFetched` param was removed
+  (v5.10.0); a meta-test that permanently forbids `git push --force`/`--force-with-lease`.
 - **Bug fixes (each red→green, both runtimes):** `#1` UTF-8 decode of git output (non-ASCII branch names
   survive cp936/GBK); `#2`-twin non-destructive `gitmerge` fetch; `#3` gitsync honors the `#10` skip in its
   push set; `#4` gitstatus doesn't fold stderr into porcelain; `#5` display-width-aware banner truncation;
@@ -78,4 +82,4 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
 - **Features:** capability-gated visual selection + upgrade advisory (surfaced by all three commands —
   gitmerge/gitsync/gitstatus, v5.8.0); display-width helpers.
 - **Tests:** dependency-free harness (no Pester), hermetic sandboxed repos + path-containment guard,
-  smoke/characterization/safety suites, a cross-runtime driver. **74 passing on both runtimes.**
+  smoke/characterization/safety suites, a cross-runtime driver. **76 passing on both runtimes.**

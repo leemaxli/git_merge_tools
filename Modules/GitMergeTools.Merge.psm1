@@ -274,17 +274,17 @@ function Invoke-BranchFastForward {
 }
 
 function Invoke-GitMergeConsolidation {
-    # The transactional consolidation engine, shared by gitmerge and (via -RemoteAlreadyFetched) gitsync.
-    # Renders in-transaction progress through the caller's $Visual; mutates the caller-supplied $RunState
-    # and returns $true/$false. The caller owns the run banner (before) and the run summary (after).
+    # The transactional consolidation engine, shared by gitmerge and gitsync. Renders in-transaction
+    # progress through the caller's $Visual; mutates the caller-supplied $RunState (including its actual
+    # SynchronizedBranches set, which gitsync pushes verbatim) and returns $true/$false. The caller owns
+    # the run banner (before) and the run summary (after).
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Interactive, colorized engine output.')]
     [CmdletBinding()]
     [OutputType([bool])]
     param(
         [string]$BranchName = '',
         [Parameter(Mandatory)]$RunState,
-        $Visual,
-        [switch]$RemoteAlreadyFetched
+        $Visual
     )
 
     function Write-Stage {

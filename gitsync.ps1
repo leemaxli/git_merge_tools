@@ -383,6 +383,10 @@ function gitsync {
             Write-Warning $failureReason
             return $false
         }
+        # Push exactly what the engine actually synchronized -- the engine is the single source of truth
+        # for the #10 sub-branch skip, so gitsync can never push (nor report as synced) a branch the
+        # engine deliberately skipped. main is always included even when no targets were synchronized.
+        $pushBranches = Get-UniqueBranchList (@($mainBranch) + @($mergeState.SynchronizedBranches))
     }
 
     Write-Stage -Title 'PUSH REMOTE' -Subtitle 'Push main and synchronized local branches to origin with one atomic update' -StageIcon 'PUSH'
