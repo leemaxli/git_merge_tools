@@ -771,6 +771,314 @@ function Invoke-GitMergeConsolidation {
         }
 }
 
+function Invoke-TwoBranchMerge {
+    # 2-branch bidirectional merge engine (v7.0): merges the current branch and target X so BOTH
+    # converge to their union. De-main-centered: main is touched only when it IS current or X.
+    # Safety machinery mirrors Invoke-GitMergeConsolidation: throwaway worktree -> merge --no-edit
+    # to validate and build the union -> staleness CAS re-check -> fast-forward BOTH real refs ->
+    # cleanup in finally. Never resets, rebases, or force-moves anything.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Interactive, colorized engine output.')]
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [string]$BranchName = '',
+        [Parameter(Mandatory)]$RunState,
+        $Visual
+    )
+
+    function Write-Stage {
+        param([string]$Title, [string]$Subtitle, [string]$StageIcon, [ConsoleColor]$Color = [ConsoleColor]::Cyan)
+        if ($null -ne $Visual) {
+            & $Visual.WriteStage -Title $Title -Subtitle $Subtitle -StageIcon $StageIcon -Color $Color
+            return
+        }
+        Write-Host ''
+        Write-Host '----------------------------------------------------------' -ForegroundColor DarkGray
+        Write-Host "  $Title" -ForegroundColor $Color
+        if (-not [string]::IsNullOrWhiteSpace($Subtitle)) {
+            Write-Host "  $Subtitle" -ForegroundColor DarkGray
+        }
+        Write-Host '----------------------------------------------------------' -ForegroundColor DarkGray
+    }
+
+    function Write-StatusLine {
+        param([string]$Marker, [string]$Message, [ConsoleColor]$Color = [ConsoleColor]::Gray)
+        if ($null -ne $Visual) {
+            & $Visual.WriteStatusLine -Marker $Marker -Message $Message -Color $Color
+            return
+        }
+        Write-Host ("   {0,-3} {1}" -f $Marker, $Message) -ForegroundColor $Color
+    }
+
+    # Step 1: Resolve repository.
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        $RunState.FailureReason = 'Git is not installed or is not available on PATH.'
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+    $rootResult = Invoke-GitCommand '' @('rev-parse', '--show-toplevel') -SuppressError
+    if ($rootResult.ExitCode -ne 0) {
+        $RunState.FailureReason = 'Current directory is not inside a Git repository.'
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+    $repository = Get-FirstOutputLine $rootResult
+    $RunState.Repository = $repository
+    $RunState.SummaryEnabled = $true
+
+    Write-Stage -Title 'PREFLIGHT' -Subtitle 'Resolve repository, branches, and affected worktrees' -StageIcon 'SCAN'
+    Write-StatusLine -Marker 'i' -Message "Git root: $repository" -Color Green
+
+    # Step 2: HEAD must have a commit; get current branch.
+    $headResult = Invoke-GitCommand $repository @('rev-parse', '--verify', 'HEAD') -SuppressError
+    if ($headResult.ExitCode -ne 0) {
+        $RunState.FailureReason = 'Repository has no commits yet. Create an initial commit before running gitmerge.'
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+    $current = Get-CurrentBranch $repository
+    if ([string]::IsNullOrWhiteSpace($current)) {
+        $RunState.FailureReason = 'Current HEAD is detached; pass an explicit branch, all, or cross-all.'
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+    Write-StatusLine -Marker 'i' -Message "Current branch: $current" -Color Green
+
+    # Step 3: Resolve X.
+    $X = $null
+    if ([string]::IsNullOrWhiteSpace($BranchName)) {
+        foreach ($candidate in @('main', 'master')) {
+            if (Test-LocalBranch $repository $candidate) { $X = $candidate; break }
+        }
+        if (-not $X) {
+            $RunState.FailureReason = "Cannot find a local 'main' or 'master' branch."
+            Write-Warning $RunState.FailureReason
+            return $false
+        }
+    }
+    else {
+        $X = $BranchName
+        if (-not (Test-LocalBranch $repository $X)) {
+            $RunState.FailureReason = "Local branch '$X' does not exist."
+            Write-Warning $RunState.FailureReason
+            return $false
+        }
+    }
+    Write-StatusLine -Marker 'i' -Message "Target branch: $X" -Color Green
+
+    # Step 4: X == current -> reminder no-op.
+    if ($X -ceq $current) {
+        Write-StatusLine -Marker 'i' -Message "Target '$X' is the current branch; nothing to merge." -Color DarkGray
+        $RunState.Result = 'SUCCESS'
+        $RunState.MainBranch = $current
+        $RunState.MainPublished = 'NOT REQUIRED'
+        return $true
+    }
+
+    # Step 5: Get worktree records.
+    $worktrees = Get-WorktreeRecord $repository
+    if ($null -eq $worktrees) {
+        $RunState.FailureReason = 'Git worktrees could not be enumerated.'
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+    $worktrees = @($worktrees)
+    $RunState.WorktreeCount = $worktrees.Count
+    $curWt = Find-BranchWorktree $worktrees $current
+    $xWt = Find-BranchWorktree $worktrees $X
+
+    # Step 6: Preflight cleanliness (no main requirement; just current and X worktrees).
+    if ($null -ne $curWt -and -not (Test-CleanWorktree $curWt)) {
+        $RunState.FailureReason = "No refs were changed because the '$current' worktree is not clean."
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+    if ($null -ne $xWt -and -not (Test-CleanWorktree $xWt)) {
+        $RunState.FailureReason = "No refs were changed because the '$X' worktree is not clean."
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+    Write-StatusLine -Marker 'i' -Message 'Affected worktrees are clean.' -Color Green
+
+    # Sub-branch skip guard (mirrors the #10 guard in Invoke-GitMergeConsolidation): if X has an
+    # unmerged descendant branch not in our target set, skip X with a warning rather than silently
+    # consolidating a branch whose children would be left behind.
+    $allLocalBranches = @(Get-LocalBranch $repository | Where-Object {
+        -not $_.StartsWith('gitmerge-tmp-', [System.StringComparison]::Ordinal)
+    })
+    $targetSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    [void]$targetSet.Add($current)
+    [void]$targetSet.Add($X)
+    $xDescendants = @($allLocalBranches | Where-Object {
+        $_ -cne $X -and -not $targetSet.Contains($_) -and
+        (Test-Ancestor -Repository $repository -Ancestor "refs/heads/$X" -Descendant "refs/heads/$_")
+    })
+    if ($xDescendants.Count -gt 0) {
+        $RunState.SkippedBranches.Add($X)
+        Write-StatusLine -Marker 'x' -Message "Skipping '$X': unmerged descendant branch(es): $($xDescendants -join ', '). Merge them back into '$X' (or select them too / use 'all') to include its work." -Color Yellow
+        $RunState.Result = 'SUCCESS'
+        $RunState.MainBranch = $current
+        $RunState.MainPublished = 'NOT REQUIRED'
+        return $true
+    }
+
+    # Step 7: Capture old tips.
+    $curOld = Get-RefHash $repository "refs/heads/$current"
+    $xOld = Get-RefHash $repository "refs/heads/$X"
+    if (-not $curOld -or -not $xOld) {
+        $RunState.FailureReason = 'Cannot resolve branch tip hashes.'
+        Write-Warning $RunState.FailureReason
+        return $false
+    }
+
+    # Step 8: Create throwaway worktree at current's tip.
+    $suffix = $null
+    do {
+        $suffix = [guid]::NewGuid().ToString('N')
+        $temporaryBranch = "gitmerge-tmp-$suffix"
+    } while (Test-LocalBranch $repository $temporaryBranch)
+    $temporaryWorktree = Join-Path ([System.IO.Path]::GetTempPath()) $temporaryBranch
+
+    try {
+        Write-Stage -Title 'TEMPORARY MERGE' -Subtitle "Build and validate the union of '$current' and '$X' before touching real refs" -StageIcon 'MERGE'
+        Write-StatusLine -Marker '->' -Message "Creating temporary branch '$temporaryBranch' at '$current'." -Color Cyan
+        $create = Invoke-GitCommand $repository @(
+            'worktree', 'add', '-b', $temporaryBranch, $temporaryWorktree, "refs/heads/$current"
+        ) -MergeError
+        if ($create.ExitCode -ne 0) {
+            Write-GitFailure 'Cannot create the temporary merge worktree' $create
+            $RunState.FailureReason = 'Cannot create the temporary merge worktree.'
+            return $false
+        }
+        Write-StatusLine -Marker 'i' -Message "Temporary worktree: $temporaryWorktree" -Color Green
+
+        # Step 9: Merge X into the throwaway to build the union.
+        $merge = Invoke-GitCommand $temporaryWorktree @(
+            'merge', '--no-edit', '-m', "Merge branch '$X' into '$current'", "refs/heads/$X"
+        ) -MergeError
+        if ($merge.ExitCode -ne 0) {
+            Write-GitFailure "Merge conflict or failure merging '$X' into '$current'" $merge
+            $RunState.ConflictBranch = $X
+            $RunState.FailureReason = "Conflict merging '$X' into '$current'."
+            $mergeInProgress = (Invoke-GitCommand $temporaryWorktree @('rev-parse', '--verify', '-q', 'MERGE_HEAD') -SuppressError).ExitCode -eq 0
+            if ($mergeInProgress) {
+                $abort = Invoke-GitCommand $temporaryWorktree @('merge', '--abort') -MergeError
+                if ($abort.ExitCode -ne 0) {
+                    Write-GitFailure 'Cannot abort the temporary merge; leaving temporary state for manual inspection' $abort
+                }
+            }
+            Write-Warning "No refs were changed. Resolve the conflict in '$X' manually, then retry."
+            return $false
+        }
+
+        # Step 10: Get union tip; sanity-check descent.
+        $unionTip = Get-RefHash $repository "refs/heads/$temporaryBranch"
+        if (-not $unionTip) {
+            $RunState.FailureReason = 'Cannot resolve union tip hash after merge.'
+            Write-Warning $RunState.FailureReason
+            return $false
+        }
+        if (-not (Test-Ancestor -Repository $repository -Ancestor "refs/heads/$current" -Descendant "refs/heads/$temporaryBranch")) {
+            $RunState.FailureReason = "The union does not descend '$current' — internal sanity check failed."
+            Write-Warning $RunState.FailureReason
+            return $false
+        }
+        if (-not (Test-Ancestor -Repository $repository -Ancestor "refs/heads/$X" -Descendant "refs/heads/$temporaryBranch")) {
+            $RunState.FailureReason = "The union does not descend '$X' — internal sanity check failed."
+            Write-Warning $RunState.FailureReason
+            return $false
+        }
+        Write-StatusLine -Marker 'i' -Message "Union tip verified at $($unionTip.Substring(0,8))..." -Color Green
+
+        # Step 11: Staleness re-check (concurrency guard).
+        $curNow = Get-RefHash $repository "refs/heads/$current"
+        $xNow = Get-RefHash $repository "refs/heads/$X"
+        if ($curNow -ne $curOld -or $xNow -ne $xOld) {
+            $RunState.FailureReason = "'$current' or '$X' changed during the merge; refusing to publish a stale result."
+            Write-Warning $RunState.FailureReason
+            return $false
+        }
+
+        # Step 12: Apply — fast-forward both real refs to unionTip.
+        Write-Stage -Title 'PUBLISH' -Subtitle "Fast-forward '$current' and '$X' to the union" -StageIcon 'PUSH'
+
+        # Fast-forward current (it is checked out in curWt or we use update-ref CAS).
+        $curApplyOk = $false
+        if ($null -ne $curWt) {
+            # Re-check cleanliness before touching it.
+            if (-not (Test-CleanWorktree $curWt)) {
+                $RunState.FailureReason = "The '$current' worktree changed after preflight."
+                Write-Warning $RunState.FailureReason
+                return $false
+            }
+            $curApply = Invoke-GitCommand $curWt.Path @('merge', '--ff-only', $unionTip) -MergeError
+            $curApplyOk = ($curApply.ExitCode -eq 0)
+            if (-not $curApplyOk) {
+                Write-GitFailure "Cannot fast-forward '$current' to union" $curApply
+                $RunState.FailureReason = "Cannot fast-forward '$current' to the union."
+                Write-Warning $RunState.FailureReason
+                return $false
+            }
+        }
+        else {
+            $curApplyOk = Move-BranchRefSafely -Repository $repository -Branch $current -ExpectedOldHash $curOld -NewHash $unionTip
+            if (-not $curApplyOk) {
+                $RunState.FailureReason = "Cannot advance '$current' to the union (CAS failed — concurrent change?)."
+                Write-Warning $RunState.FailureReason
+                return $false
+            }
+        }
+        Write-StatusLine -Marker 'i' -Message "Fast-forwarded '$current' to the union." -Color Green
+        $RunState.IntegratedBranches.Add($current)
+
+        # Fast-forward X (use worktree ff-only if checked out, else CAS update-ref).
+        $xApplyOk = $false
+        if ($null -ne $xWt) {
+            $xApply = Invoke-GitCommand $xWt.Path @('merge', '--ff-only', $unionTip) -MergeError
+            $xApplyOk = ($xApply.ExitCode -eq 0)
+            if (-not $xApplyOk) {
+                Write-GitFailure "Cannot fast-forward '$X' to union" $xApply
+                $RunState.FailureReason = "Cannot fast-forward '$X' to the union."
+                Write-Warning $RunState.FailureReason
+                return $false
+            }
+        }
+        else {
+            $xApplyOk = Move-BranchRefSafely -Repository $repository -Branch $X -ExpectedOldHash $xOld -NewHash $unionTip
+            if (-not $xApplyOk) {
+                $RunState.FailureReason = "Cannot advance '$X' to the union (CAS failed — concurrent change?)."
+                Write-Warning $RunState.FailureReason
+                return $false
+            }
+        }
+        Write-StatusLine -Marker 'i' -Message "Fast-forwarded '$X' to the union." -Color Green
+        $RunState.SynchronizedBranches.Add($X)
+
+        # Step 13: Record success.
+        $RunState.Result = 'SUCCESS'
+        $RunState.MainBranch = $current
+        $RunState.MainPublished = 'NOT REQUIRED'
+        Write-StatusLine -Marker 'i' -Message "Converged '$current' and '$X' to the union." -Color Green
+        return $true
+    }
+    finally {
+        # Step 14: Always clean up the throwaway.
+        Write-Stage -Title 'CLEANUP' -Subtitle 'Remove temporary worktree and branch' -StageIcon 'CLEAN'
+        $cleanupOk = Invoke-TemporaryCleanup -Repository $repository -WorktreePath $temporaryWorktree -TemporaryBranch $temporaryBranch
+        $RunState.CleanupStatus = if ($cleanupOk) { 'CLEAN' } else { 'FAILED' }
+        if ($cleanupOk) {
+            Write-StatusLine -Marker 'i' -Message 'Temporary merge state removed.' -Color Green
+        }
+        else {
+            Write-StatusLine -Marker 'x' -Message 'Temporary cleanup was incomplete.' -Color Red
+            if ([string]::IsNullOrWhiteSpace($RunState.FailureReason)) {
+                $RunState.FailureReason = 'Temporary cleanup was incomplete.'
+            }
+            $RunState.Result = 'FAILED'
+        }
+    }
+}
+
 Export-ModuleMember -Function @(
     'Get-WorktreeInProgressOperation',
     'Get-RemoteBranchSyncState',
@@ -781,5 +1089,6 @@ Export-ModuleMember -Function @(
     'Invoke-TemporaryCleanup',
     'Sync-MainFromOrigin',
     'Invoke-BranchFastForward',
-    'Invoke-GitMergeConsolidation'
+    'Invoke-GitMergeConsolidation',
+    'Invoke-TwoBranchMerge'
 )

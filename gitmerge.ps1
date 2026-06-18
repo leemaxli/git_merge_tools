@@ -261,8 +261,14 @@ function gitmerge {
     Write-RunBanner -DryRun $runState.DryRun
 
     try {
-        $engineResult = @(Invoke-GitMergeConsolidation -BranchName $BranchName -RunState $runState -Visual $visual) |
-            Where-Object { $_ -is [bool] } | Select-Object -Last 1
+        $engineResult = if ($mode -in @('current', 'single')) {
+            @(Invoke-TwoBranchMerge -BranchName $BranchName -RunState $runState -Visual $visual) |
+                Where-Object { $_ -is [bool] } | Select-Object -Last 1
+        }
+        else {
+            @(Invoke-GitMergeConsolidation -BranchName $BranchName -RunState $runState -Visual $visual) |
+                Where-Object { $_ -is [bool] } | Select-Object -Last 1
+        }
         return [bool]$engineResult
     }
     finally {
