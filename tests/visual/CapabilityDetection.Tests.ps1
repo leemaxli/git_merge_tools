@@ -1,7 +1,8 @@
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$modulesRoot = Join-Path $repoRoot 'Modules'
 
 Test-Case 'rich env detection flags a bare console (no WT_SESSION/TERM_PROGRAM, TERM unset) as not-capable' {
-    Import-Module (Join-Path $repoRoot 'GitMergeTools.Common.PowerShell7.psm1') -Force
+    Import-Module (Join-Path $modulesRoot 'GitMergeTools.Common.PowerShell7.psm1') -Force
     $saved = @{ WT = $env:WT_SESSION; TP = $env:TERM_PROGRAM; TERM = $env:TERM }
     try {
         Remove-Item Env:WT_SESSION -ErrorAction SilentlyContinue
@@ -19,7 +20,7 @@ Test-Case 'rich env detection flags a bare console (no WT_SESSION/TERM_PROGRAM, 
 }
 
 Test-Case 'rich env detection does NOT add the terminal reason when WT_SESSION is set' {
-    Import-Module (Join-Path $repoRoot 'GitMergeTools.Common.PowerShell7.psm1') -Force
+    Import-Module (Join-Path $modulesRoot 'GitMergeTools.Common.PowerShell7.psm1') -Force
     $saved = @{ WT = $env:WT_SESSION; TP = $env:TERM_PROGRAM; TERM = $env:TERM }
     try {
         $env:WT_SESSION = 'test-session'
@@ -37,7 +38,7 @@ Test-Case 'rich env detection does NOT add the terminal reason when WT_SESSION i
 }
 
 Test-Case 'pinned standard falls back to basic when console output is not UTF-8' {
-    Import-Module (Join-Path $repoRoot 'GitMergeTools.Common.psm1') -Force
+    Import-Module (Join-Path $modulesRoot 'GitMergeTools.Common.psm1') -Force
     $savedMode = $env:GITMERGE_VISUAL_MODE
     $savedEnc = [Console]::OutputEncoding
     try {

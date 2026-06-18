@@ -30,12 +30,16 @@ function gitmerge {
     )
 
     # Load the shared modules: Core (git primitives: Invoke-GitCommand, ref/branch/worktree helpers,
-    # Get-Mode, ...) and Merge (the transactional engine helpers). Resolution: this script's folder ->
-    # its command path's folder -> $env:GITMERGE_TOOLS_HOME. Both are mandatory.
+    # Get-Mode, ...) and Merge (the transactional engine helpers). The .psm1 modules live in a Modules/
+    # subfolder beside the command scripts; a flat layout is still tolerated. Resolution: this script's
+    # folder -> its command path's folder -> $env:GITMERGE_TOOLS_HOME. Both modules are mandatory.
     $gmtModuleDir = $null
     foreach ($gmtDir in @($PSScriptRoot, (Split-Path -Parent $PSCommandPath), $env:GITMERGE_TOOLS_HOME)) {
         if ([string]::IsNullOrWhiteSpace($gmtDir)) { continue }
-        if (Test-Path -LiteralPath (Join-Path $gmtDir 'GitMergeTools.Core.psm1')) { $gmtModuleDir = $gmtDir; break }
+        foreach ($gmtSub in @((Join-Path $gmtDir 'Modules'), $gmtDir)) {
+            if (Test-Path -LiteralPath (Join-Path $gmtSub 'GitMergeTools.Core.psm1')) { $gmtModuleDir = $gmtSub; break }
+        }
+        if ($gmtModuleDir) { break }
     }
     if (-not $gmtModuleDir) {
         Write-Warning 'GitMergeTools.Core.psm1 was not found beside this command (set $env:GITMERGE_TOOLS_HOME to its folder).'
@@ -66,6 +70,7 @@ function gitmerge {
         $windowsOneDrivePowerShell = if ($isWindowsRuntime -and -not [string]::IsNullOrWhiteSpace($HOME)) { Join-Path (Join-Path (Join-Path $HOME 'OneDrive') 'Documents') 'PowerShell' } else { $null }
         $commonCandidates = @(
             $env:GITMERGE_TOOLS_COMMON_MODULE,
+            (Join-Path (Join-Path $basePath 'Modules') 'GitMergeTools.Common.psm1'),
             (Join-Path $basePath 'GitMergeTools.Common.psm1'),
             $(if ($xdgPowerShell) { Join-Path $xdgPowerShell 'GitMergeTools.Common.psm1' }),
             $(if ($homeConfigPowerShell) { Join-Path $homeConfigPowerShell 'GitMergeTools.Common.psm1' }),

@@ -4,10 +4,11 @@ $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)   # tests/meta
 # scans the git-invoking source so a future refactor can never silently reintroduce a force-push. The
 # only --force permitted anywhere is `git worktree remove --force` (the tool's own temp-worktree teardown).
 Test-Case 'no git push uses --force / --force-with-lease; the only --force is the temp-worktree removal' {
+    $modulesRoot = Join-Path $repoRoot 'Modules'
     $files = @(
-        'gitmerge.ps1', 'gitsync.ps1', 'gitstatus.ps1',
-        'GitMergeTools.Core.psm1', 'GitMergeTools.Merge.psm1'
-    ) | ForEach-Object { Join-Path $repoRoot $_ }
+        ('gitmerge.ps1', 'gitsync.ps1', 'gitstatus.ps1' | ForEach-Object { Join-Path $repoRoot $_ })
+        ('GitMergeTools.Core.psm1', 'GitMergeTools.Merge.psm1' | ForEach-Object { Join-Path $modulesRoot $_ })
+    )
 
     foreach ($file in $files) {
         Assert-True (Test-Path -LiteralPath $file) -Message "source file must exist: $file"

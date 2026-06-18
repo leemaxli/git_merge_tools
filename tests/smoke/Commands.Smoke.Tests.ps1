@@ -27,7 +27,7 @@ Test-Case 'gitmerge debug returns true (dry-run, basic visuals)' {
 # deterministic reproduction.
 Test-Case 'rich renderer WriteStage renders a stage icon without crashing (defect #1 fixed)' {
     $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-    Import-Module (Join-Path $repoRoot 'GitMergeTools.Visual.Rich.psm1') -Force
+    Import-Module (Join-Path (Join-Path $repoRoot 'Modules') 'GitMergeTools.Visual.Rich.psm1') -Force
     $r = New-GitMergeToolsVisualRich -CommandName 'gitmerge' -RequestedVisualMode 'rich' -RichUnavailableReasons @() -VisualWarningSuppressed:$true
     # Capture host output; must NOT throw (defect #1 was a $stageIcon/$StageIcon collision -> & 'SCAN' 'SCAN').
     & $r.WriteStage -Title 'PREFLIGHT' -Subtitle 'x' -StageIcon 'SCAN' -Color ([ConsoleColor]::Cyan) *> $null

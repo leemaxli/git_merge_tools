@@ -1,5 +1,5 @@
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-Import-Module (Join-Path $repoRoot 'GitMergeTools.Common.psm1') -Force
+Import-Module (Join-Path (Join-Path $repoRoot 'Modules') 'GitMergeTools.Common.psm1') -Force
 
 # ---- pure color-level resolver ----
 Test-Case 'color level: redirected => 0 (no color into a non-tty stream)' {

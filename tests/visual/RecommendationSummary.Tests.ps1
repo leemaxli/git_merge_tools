@@ -1,5 +1,5 @@
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-Import-Module (Join-Path $repoRoot 'GitMergeTools.Common.psm1') -Force
+Import-Module (Join-Path (Join-Path $repoRoot 'Modules') 'GitMergeTools.Common.psm1') -Force
 
 function New-RtState {
     param([bool]$Ps7, [bool]$Ps7Available = $true, [bool]$Ps51Available = $true)

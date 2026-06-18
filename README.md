@@ -2,7 +2,7 @@
 
 :cn: **简体中文** · [:us: English](README.en.md)
 
-**当前版本 v5.4.0** · 见下方[版本历史](#版本历史)
+**当前版本 v5.5.0** · 见下方[版本历史](#版本历史)
 
 跨平台 PowerShell 工具,用于**安全、事务式**地在本地把 Git 分支经 main 整合,并带一套按终端能力
 自动降级的视觉层。可运行于 **PowerShell 7+**(优先)与 **Windows PowerShell 5.1**,支持
@@ -32,8 +32,20 @@ Windows / Linux / macOS。
 
 ## 安装
 
-把所有 `*.ps1` 和 `GitMergeTools.*.psm1` 放在同一个文件夹,然后在 PowerShell 配置文件里 dot-source
-这三个命令(如果 PowerShell 7 和 Windows PowerShell 5.1 都用,就在两个配置文件根目录都加):
+把三个命令脚本(`gitmerge.ps1`、`gitsync.ps1`、`gitstatus.ps1`)放在安装文件夹顶层,旁边保留装着
+`GitMergeTools.*.psm1` 模块的 `Modules/` 子文件夹(即本仓库自身的布局):
+
+```
+GitMergeTools/
+├─ gitmerge.ps1
+├─ gitsync.ps1
+├─ gitstatus.ps1
+└─ Modules/
+   └─ GitMergeTools.*.psm1
+```
+
+然后在 PowerShell 配置文件里 dot-source 这三个命令(如果 PowerShell 7 和 Windows PowerShell 5.1
+都用,就在两个配置文件根目录都加):
 
 ```powershell
 # 在 $PROFILE 中
@@ -42,8 +54,8 @@ Windows / Linux / macOS。
 . 'C:\path\to\GitMergeTools\gitstatus.ps1'
 ```
 
-如果加载方式导致 `$PSScriptRoot` 无法解析(例如把函数直接粘贴进配置文件),把 `GITMERGE_TOOLS_HOME`
-设为安装目录。
+加载器会先在 `Modules/` 子文件夹里找模块,同时仍兼容扁平布局(全部放在同一文件夹)。如果加载方式
+导致 `$PSScriptRoot` 无法解析(例如把函数直接粘贴进配置文件),把 `GITMERGE_TOOLS_HOME` 设为安装目录。
 
 ## 视觉档位
 
@@ -78,15 +90,16 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # 仅当前运行时
 
 ## 状态
 
-功能完整、测试充分(已知缺陷全部修复;两运行时 57 项测试全绿)。**结构性重构主体已完成**:已抽出
+功能完整、测试充分(已知缺陷全部修复;两运行时 62 项测试全绿)。**结构性重构主体已完成**:已抽出
 `Core.psm1`(git 原语)与 `Merge.psm1`(事务引擎),三条命令成为同一引擎上的薄壳并去除了命令间耦合;
 后续的环境模块合并与 git 安全加固按路线图推进中。
 
 ## 版本历史
 
-> 当前版本:**v5.4.0**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
+> 当前版本:**v5.5.0**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
 
 **v5.x —— 模块化、引擎统一与持续加固(当前)**
+- **v5.5.0** —— 仓库整理:入口命令(`gitmerge`/`gitsync`/`gitstatus`)留在顶层,所有 `GitMergeTools.*.psm1` 模块移入 `Modules/` 子文件夹(PowerShell 约定)。加载器优先查找 `Modules/`,同时仍兼容扁平布局,既有安装不受影响。
 - **v5.4.0** —— 架构瘦身(反过度设计):**把 `max` 顶档并入 `rich` 并删除该档**(原 `max` 只是 rich 的重打标签,truecolor/OSC 效果作为镀金砍掉);`GITMERGE_VISUAL_MODE=max` 保留为 `rich` 的兼容别名。视觉档位精简为 `rich/standard/basic`。
 - **v5.3.1** —— 修复升级建议:当环境已达最优(`max` + PowerShell 7)时**不再弹出任何升级建议**;建议仅在**显式固定的档位未达成**时出现,且指出**具体缺失的能力项**(原先以 `rich` 为基准,在更高的 `max` 档下误报为"未启用 rich")。
 - **v5.3.0** —— git 安全加固开篇:在统一的 `Invoke-GitCommand` 里**中和继承的 `GIT_DIR`/`GIT_WORK_TREE`/…** 定位变量(捕获后清空、用后恢复),防止泄漏的环境变量把 git 指向错误仓库、绕过路径 containment 守护。

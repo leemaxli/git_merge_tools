@@ -22,13 +22,17 @@ function gitstatus {
         [string]$BranchName = ''
     )
 
-    # Load the shared git primitives (Core). Resolution: this script's folder -> its command path's
-    # folder -> $env:GITMERGE_TOOLS_HOME. Core is mandatory; without it the command cannot run safely.
+    # Load the shared git primitives (Core). The .psm1 modules live in a Modules/ subfolder beside the
+    # command scripts; a flat layout is still tolerated. Resolution: this script's folder -> its command
+    # path's folder -> $env:GITMERGE_TOOLS_HOME. Core is mandatory; without it the command cannot run safely.
     $gmtCoreModule = $null
     foreach ($gmtDir in @($PSScriptRoot, (Split-Path -Parent $PSCommandPath), $env:GITMERGE_TOOLS_HOME)) {
         if ([string]::IsNullOrWhiteSpace($gmtDir)) { continue }
-        $gmtCandidate = Join-Path $gmtDir 'GitMergeTools.Core.psm1'
-        if (Test-Path -LiteralPath $gmtCandidate) { $gmtCoreModule = $gmtCandidate; break }
+        foreach ($gmtSub in @((Join-Path $gmtDir 'Modules'), $gmtDir)) {
+            $gmtCandidate = Join-Path $gmtSub 'GitMergeTools.Core.psm1'
+            if (Test-Path -LiteralPath $gmtCandidate) { $gmtCoreModule = $gmtCandidate; break }
+        }
+        if ($gmtCoreModule) { break }
     }
     if (-not $gmtCoreModule) {
         Write-Warning 'GitMergeTools.Core.psm1 was not found beside this command (set $env:GITMERGE_TOOLS_HOME to its folder).'
@@ -58,6 +62,7 @@ function gitstatus {
         $windowsOneDrivePowerShell = if ($isWindowsRuntime -and -not [string]::IsNullOrWhiteSpace($HOME)) { Join-Path (Join-Path (Join-Path $HOME 'OneDrive') 'Documents') 'PowerShell' } else { $null }
         $commonCandidates = @(
             $env:GITMERGE_TOOLS_COMMON_MODULE,
+            (Join-Path (Join-Path $basePath 'Modules') 'GitMergeTools.Common.psm1'),
             (Join-Path $basePath 'GitMergeTools.Common.psm1'),
             $(if ($xdgPowerShell) { Join-Path $xdgPowerShell 'GitMergeTools.Common.psm1' }),
             $(if ($homeConfigPowerShell) { Join-Path $homeConfigPowerShell 'GitMergeTools.Common.psm1' }),

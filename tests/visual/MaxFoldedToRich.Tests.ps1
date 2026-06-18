@@ -1,5 +1,5 @@
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-Import-Module (Join-Path $repoRoot 'GitMergeTools.Common.psm1') -Force
+Import-Module (Join-Path (Join-Path $repoRoot 'Modules') 'GitMergeTools.Common.psm1') -Force
 
 # The 'max' tier was folded into 'rich' and deleted (its truecolor/OSC effects were cut as eye-candy).
 # GITMERGE_VISUAL_MODE=max stays a compatibility alias that resolves to rich; max no longer appears as a
@@ -18,6 +18,6 @@ Test-Case 'the visual candidate list no longer contains max (auto starts at rich
 }
 
 Test-Case 'the Max renderer module and the max gate function are gone' {
-    Assert-False (Test-Path -LiteralPath (Join-Path $repoRoot 'GitMergeTools.Visual.Max.psm1')) -Message 'Visual.Max.psm1 deleted'
+    Assert-False (Test-Path -LiteralPath (Join-Path (Join-Path $repoRoot 'Modules') 'GitMergeTools.Visual.Max.psm1')) -Message 'Visual.Max.psm1 deleted'
     Assert-False ([bool](Get-Command Test-GitMergeToolsMaxAvailable -ErrorAction SilentlyContinue)) 'Test-GitMergeToolsMaxAvailable removed'
 }

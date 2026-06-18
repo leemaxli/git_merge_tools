@@ -1,5 +1,5 @@
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-Import-Module (Join-Path $repoRoot 'GitMergeTools.Common.psm1') -Force
+Import-Module (Join-Path (Join-Path $repoRoot 'Modules') 'GitMergeTools.Common.psm1') -Force
 
 function New-AdvCap {
     param($cl = 1, $vt = $false, $u = $true, $rd = $false, $ci = $false, $nc = $false)

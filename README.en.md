@@ -2,7 +2,7 @@
 
 [:cn: 简体中文](README.md) · :us: **English**
 
-**Current version v5.4.0** · see [Version history](#version-history) below
+**Current version v5.5.0** · see [Version history](#version-history) below
 
 Cross-platform PowerShell helpers for **safe, transactional** local Git branch consolidation —
 with an auto-degrading, capability-aware visual layer. Runs on **PowerShell 7+** (preferred) and
@@ -33,9 +33,21 @@ back) is **skipped with a warning** rather than silently consolidated.
 
 ## Install
 
-Put all the `*.ps1` and `GitMergeTools.*.psm1` files in one folder, then dot-source the three
-commands from your PowerShell profile (do this in **both** the PowerShell 7 and Windows PowerShell 5.1
-profile roots if you use both):
+Keep the three command scripts (`gitmerge.ps1`, `gitsync.ps1`, `gitstatus.ps1`) at the top of the
+install folder, with the `Modules/` subfolder holding the `GitMergeTools.*.psm1` modules right beside
+them (the repository's own layout):
+
+```
+GitMergeTools/
+├─ gitmerge.ps1
+├─ gitsync.ps1
+├─ gitstatus.ps1
+└─ Modules/
+   └─ GitMergeTools.*.psm1
+```
+
+Then dot-source the three commands from your PowerShell profile (do this in **both** the PowerShell 7
+and Windows PowerShell 5.1 profile roots if you use both):
 
 ```powershell
 # in $PROFILE
@@ -44,8 +56,9 @@ profile roots if you use both):
 . 'C:\path\to\GitMergeTools\gitstatus.ps1'
 ```
 
-If the commands are loaded in a way where `$PSScriptRoot` can't resolve (e.g. pasted directly into a
-profile), set `GITMERGE_TOOLS_HOME` to the install folder.
+The loaders look for the modules in the `Modules/` subfolder first and still tolerate a flat layout
+(everything in one folder). If the commands are loaded in a way where `$PSScriptRoot` can't resolve
+(e.g. pasted directly into a profile), set `GITMERGE_TOOLS_HOME` to the install folder.
 
 ## Visual tiers
 
@@ -81,17 +94,18 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # current runtime only
 
 ## Status
 
-Functional and fully tested (all known defects fixed; 57-test suite green on both runtimes). **The
+Functional and fully tested (all known defects fixed; 62-test suite green on both runtimes). **The
 core of the structural refactor is done**: `Core.psm1` (git primitives) and `Merge.psm1` (the
 transactional engine) are extracted, the three commands are thin peers on one engine with no
 cross-command coupling; the remaining environment-module merge and git-safety hardening are in progress.
 
 ## Version history
 
-> Current version: **v5.4.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
+> Current version: **v5.5.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
 > from v4 on, the history follows the Git commit log.
 
 **v5.x — Modularization, engine unification & ongoing hardening (current)**
+- **v5.5.0** — Repository tidy-up: the entry commands (`gitmerge`/`gitsync`/`gitstatus`) stay at the top level, while all `GitMergeTools.*.psm1` modules move into a `Modules/` subfolder (the PowerShell convention). The loaders prefer `Modules/` and still tolerate a flat layout, so existing installs keep working.
 - **v5.4.0** — Architecture slimming (anti-over-engineering): **folded the `max` tier into `rich` and deleted it** (`max` was just a re-tag of rich; the truecolor/OSC effects were cut as gilding); `GITMERGE_VISUAL_MODE=max` stays a compatibility alias for `rich`. Visual tiers are now `rich/standard/basic`.
 - **v5.3.1** — Upgrade-advisory fix: when the environment is already optimal (`max` + PowerShell 7) **no advisory is shown at all**; it now appears only when an **explicitly pinned tier isn't reached** and names the **specific missing capability** (it previously used `rich` as the baseline and falsely nagged at the higher `max` tier).
 - **v5.3.0** — Git-safety hardening begins: the unified `Invoke-GitCommand` now **neutralizes inherited `GIT_DIR`/`GIT_WORK_TREE`/… locating env vars** (captured, cleared, restored), so a leaked variable can't silently point git at the wrong repository or bypass the path-containment guard.

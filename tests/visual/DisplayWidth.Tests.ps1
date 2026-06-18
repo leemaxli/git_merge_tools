@@ -1,5 +1,5 @@
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-Import-Module (Join-Path $repoRoot 'GitMergeTools.Visual.Common.psm1') -Force
+Import-Module (Join-Path (Join-Path $repoRoot 'Modules') 'GitMergeTools.Visual.Common.psm1') -Force
 
 # #5: banner/box truncation used String.Length (UTF-16 code units), so CJK/wide titles overflowed the
 # frame and a surrogate pair could be cut in half. Truncation/padding must be display-width aware.
