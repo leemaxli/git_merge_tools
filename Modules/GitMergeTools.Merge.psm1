@@ -27,6 +27,39 @@ param()
 # progress lines; the caller supplies the rich renderer. Depends on Core for the git primitives.
 Import-Module (Join-Path $PSScriptRoot 'GitMergeTools.Core.psm1') -ErrorAction Stop
 
+function Get-WorktreeInProgressOperation {
+    # Returns a human operation name ('a merge' / 'a rebase' / 'a cherry-pick' / 'a revert') if the
+    # worktree is mid-operation, else $null. Each operation drops a marker in the worktree's OWN git dir;
+    # resolving every marker via `git rev-parse --git-path` keeps this correct for linked worktrees, whose
+    # state lives under .git/worktrees/<name>/ rather than the repository root.
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)]$Worktree)
+
+    if ($null -eq $Worktree -or [string]::IsNullOrWhiteSpace($Worktree.Path) -or -not (Test-Path -LiteralPath $Worktree.Path)) {
+        return $null
+    }
+    $markers = @(
+        @{ Name = 'MERGE_HEAD'; Op = 'a merge' },
+        @{ Name = 'CHERRY_PICK_HEAD'; Op = 'a cherry-pick' },
+        @{ Name = 'REVERT_HEAD'; Op = 'a revert' },
+        @{ Name = 'REBASE_HEAD'; Op = 'a rebase' },
+        @{ Name = 'rebase-merge'; Op = 'a rebase' },
+        @{ Name = 'rebase-apply'; Op = 'a rebase' }
+    )
+    foreach ($marker in $markers) {
+        $resolved = Invoke-GitCommand $Worktree.Path @('rev-parse', '--git-path', $marker.Name) -SuppressError
+        if ($resolved.ExitCode -ne 0) { continue }
+        $markerPath = Get-FirstOutputLine $resolved
+        if ([string]::IsNullOrWhiteSpace($markerPath)) { continue }
+        if (-not [System.IO.Path]::IsPathRooted($markerPath)) {
+            $markerPath = [System.IO.Path]::GetFullPath((Join-Path $Worktree.Path $markerPath))
+        }
+        if (Test-Path -LiteralPath $markerPath) { return $marker.Op }
+    }
+    return $null
+}
+
 function Test-CleanWorktree {
     param([Parameter(Mandatory)]$Worktree)
     if ($Worktree.Locked) {
@@ -37,6 +70,14 @@ function Test-CleanWorktree {
     }
     if ($Worktree.Prunable -or -not (Test-Path -LiteralPath $Worktree.Path)) {
         Write-Warning "Worktree for '$($Worktree.Branch)' is unavailable: $($Worktree.Path)"
+        return $false
+    }
+    # Refuse a worktree that is mid-operation BEFORE the porcelain check, so the diagnostic names the
+    # actual operation (a merge/rebase/cherry-pick/revert) rather than just calling it "uncommitted".
+    $inProgress = Get-WorktreeInProgressOperation -Worktree $Worktree
+    if ($inProgress) {
+        Write-Warning "Affected worktree has $inProgress in progress: $($Worktree.Path)"
+        Write-Host '  Finish or abort it (e.g. git merge --abort / git rebase --abort), then retry.' -ForegroundColor DarkGray
         return $false
     }
     $status = Invoke-GitCommand $Worktree.Path @(
@@ -625,6 +666,7 @@ function Invoke-GitMergeConsolidation {
 }
 
 Export-ModuleMember -Function @(
+    'Get-WorktreeInProgressOperation',
     'Test-CleanWorktree',
     'Test-TemporaryWorktreeForCleanup',
     'Invoke-TemporaryCleanup',

@@ -17,9 +17,6 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
   three entry scripts. *(Optional, lower priority)* merge `Basic/Standard/Rich` into one `Visual.Renderers.psm1`.
 
 ### Git-safety hardening (cheap core only — hangs on Core's unified `Invoke-GitCommand`)
-- In-progress-op preflight: refuse when an affected worktree has `MERGE_HEAD` / `REBASE_HEAD` /
-  `CHERRY_PICK_HEAD` / `REVERT_HEAD` (or `rebase-merge`/`rebase-apply` dirs), resolved per-worktree via
-  `git rev-parse --git-path`. One regression test.
 - gitsync **structured result**: the engine returns its actual synchronized set and gitsync pushes exactly
   that — closes the skip/push divergence and removes the dead `-RemoteAlreadyFetched` param, the redundant
   `#10` double-compute, and the double-fetch. Regression test.
@@ -64,7 +61,9 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
 - **Git-safety hardening (done):** inherited `GIT_DIR`/`GIT_WORK_TREE`/… neutralization in the unified
   `Invoke-GitCommand`; a non-interactive, long-path-safe per-call profile (`GIT_TERMINAL_PROMPT=0`,
   `GIT_EDITOR=true`, `-c core.longpaths=true`, `-c rerere.enabled=false`; the env vars are captured and
-  restored, so there is no global leak) (v5.6.0); a meta-test that permanently forbids
+  restored, so there is no global leak) (v5.6.0); an in-progress-op preflight that refuses an affected
+  worktree mid-merge/rebase/cherry-pick/revert (markers resolved per-worktree via
+  `git rev-parse --git-path`) (v5.7.0); a meta-test that permanently forbids
   `git push --force`/`--force-with-lease`.
 - **Bug fixes (each red→green, both runtimes):** `#1` UTF-8 decode of git output (non-ASCII branch names
   survive cp936/GBK); `#2`-twin non-destructive `gitmerge` fetch; `#3` gitsync honors the `#10` skip in its
@@ -76,4 +75,4 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
   BOM meta-test.
 - **Features:** capability-gated visual selection + upgrade advisory; display-width helpers.
 - **Tests:** dependency-free harness (no Pester), hermetic sandboxed repos + path-containment guard,
-  smoke/characterization/safety suites, a cross-runtime driver. **67 passing on both runtimes.**
+  smoke/characterization/safety suites, a cross-runtime driver. **70 passing on both runtimes.**
