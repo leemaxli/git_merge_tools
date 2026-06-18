@@ -170,7 +170,7 @@ function gitsync {
             [timespan]$Elapsed
         )
 
-        $resultColor = if ($Result -eq 'SUCCESS') { [ConsoleColor]::Green } elseif ($Result -eq 'SIMULATED') { [ConsoleColor]::Magenta } else { [ConsoleColor]::Red }
+        $resultColor = if ($Result -eq 'SUCCESS') { [ConsoleColor]::Green } elseif ($Result -eq 'SIMULATED') { [ConsoleColor]::Magenta } elseif ($Result -eq 'ACTION NEEDED') { [ConsoleColor]::Yellow } else { [ConsoleColor]::Red }
         Write-Host ''
         Write-Host "═══════════════════  GIT SYNC SUMMARY  ═══════════════════" -ForegroundColor $resultColor
         Write-Host ("  Result          : {0}" -f $Result) -ForegroundColor $resultColor
@@ -337,27 +337,31 @@ function gitsync {
     }
     Write-StatusLine -Marker '✓' -Message 'Fetched origin before local merge.' -Color Green
 
-    $localMainRef = "refs/heads/$mainBranch"
-    $remoteMainRef = "refs/remotes/origin/$mainBranch"
-    if ((Get-RefHash $repository $remoteMainRef) -and
-        -not (Test-Ancestor -Repository $repository -Ancestor $localMainRef -Descendant $remoteMainRef) -and
-        -not (Test-Ancestor -Repository $repository -Ancestor $remoteMainRef -Descendant $localMainRef)) {
-        $failureReason = "Local '$mainBranch' and origin/$mainBranch have diverged."
-        Write-Warning $failureReason
-        return $false
-    }
-
-    foreach ($branch in $targetBranches) {
-        $localRef = "refs/heads/$branch"
-        $remoteRef = "refs/remotes/origin/$branch"
-        if ((Get-RefHash $repository $remoteRef) -and
-            -not (Test-Ancestor -Repository $repository -Ancestor $remoteRef -Descendant $localRef)) {
-            $failureReason = "origin/$branch has commits that are not present in local '$branch'."
-            Write-Warning "$failureReason Merge or review that remote branch manually, then retry."
-            return $false
+    # REMOTE PULL phase (v6.x): classify each branch gitsync will sync against origin. v6.0 (Stage 1)
+    # detects when origin is ahead (a safe fast-forward) or diverged and STOPS with an ACTION NEEDED
+    # prompt, changing nothing; automatic safe pulling lands in later v6.x sub-versions. Branches that are
+    # in sync or where local is ahead proceed to the normal consolidate + push below.
+    $fastForwardable = [System.Collections.Generic.List[string]]::new()
+    $diverged = [System.Collections.Generic.List[string]]::new()
+    foreach ($branch in $pushBranches) {
+        switch (Get-RemoteBranchSyncState -Repository $repository -Branch $branch) {
+            'FastForwardable' { $fastForwardable.Add($branch) }
+            'Diverged' { $diverged.Add($branch) }
         }
     }
-    Write-StatusLine -Marker '✓' -Message "Remote branch preflight passed for: $($pushBranches -join ', ')" -Color Green
+    if ($fastForwardable.Count -gt 0 -or $diverged.Count -gt 0) {
+        Write-Stage -Title 'ACTION NEEDED' -Subtitle 'origin has updates not in local; pull before syncing' -StageIcon 'REMOTE' -Color Yellow
+        foreach ($branch in $fastForwardable) {
+            Write-StatusLine -Marker '!' -Message "origin/$branch is ahead of local '$branch'. Pull it first:  git pull --ff-only origin $branch" -Color Yellow
+        }
+        foreach ($branch in $diverged) {
+            Write-StatusLine -Marker '!' -Message "origin/$branch and local '$branch' have diverged. Reconcile manually (review/merge), then retry." -Color Yellow
+        }
+        Write-StatusLine -Marker 'i' -Message 'Nothing was changed. Automatic safe pulling will arrive in a later v6.x.' -Color DarkGray
+        $syncResult = 'ACTION NEEDED'
+        return $false
+    }
+    Write-StatusLine -Marker '✓' -Message "Remote is in sync or behind local for: $($pushBranches -join ', '). Proceeding." -Color Green
 
     if ($skipLocalMerge) {
         Write-StatusLine -Marker '✓' -Message "Selected '$mainBranch'; no local merge phase is required before push." -Color Green
