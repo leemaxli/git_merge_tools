@@ -2,7 +2,7 @@
 
 :cn: **简体中文** · [:us: English](README.en.md)
 
-**当前版本 v6.7.0** · 见下方[版本历史](#版本历史)
+**当前版本 v6.7.1** · 见下方[版本历史](#版本历史)
 
 跨平台 PowerShell 工具,用于**安全、事务式**地在本地把 Git 分支经 main 整合,并带一套按终端能力
 自动降级的视觉层。可运行于 **PowerShell 7+**(优先)与 **Windows PowerShell 5.1**,支持
@@ -94,15 +94,16 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # 仅当前运行时
 
 ## 状态
 
-功能完整、测试充分(已知缺陷全部修复;两运行时 100 项测试全绿)。**结构性重构主体已完成**:已抽出
+功能完整、测试充分(已知缺陷全部修复;两运行时 103 项测试全绿)。**结构性重构主体已完成**:已抽出
 `Core.psm1`(git 原语)与 `Merge.psm1`(事务引擎),三条命令成为同一引擎上的薄壳并去除了命令间耦合;
 后续的环境模块合并与 git 安全加固按路线图推进中。
 
 ## 版本历史
 
-> 当前版本:**v6.7.0**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
+> 当前版本:**v6.7.1**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
 
 **v6.x —— 远端同步:不止 push,还能 pull(当前)**
+- **v6.7.1** —— 仅测试:为两个最危险的操作补安全回归锁 —— meta-scan 钉住 gitsync 的 `push --atomic`(并确保 gitmerge/gitstatus/引擎从不 push),以及 `Test-TemporaryWorktreeForCleanup`(唯一一次 `git worktree remove --force` 之前的守门函数)的负例测试。
 - **v6.7.0** —— skip-and-proceed(gitsync):用 `all`/`cross-all` 时,`gitsync` 现在会**跳过**无法安全拉取的非 main 分支(工作树脏,或冲突分叉),同步其余分支,而不再中止整个运行。被跳过的分支会从 pull、整合**和** push 中排除(绝不 force-push)且保持原样。单独显式指定的某个分支、或 main 不安全时,仍以 `ACTION NEEDED` 停止。
 - **v6.6.0** —— skip-and-proceed(引擎层):`gitmerge`/`gitsync` 用 `all`/`cross-all` 时,当**非 main** 目标分支工作树无法安全参与(脏,或处于 merge/rebase/cherry-pick/revert 中)时,不再中止整个运行 —— 该分支**跳过并警告**,其余照常整合(与 `#10` 子分支跳过一致)。main 工作树脏或操作进行中仍然中止(一切都经 main 整合)。
 - **v6.5.0** —— `gitsync` / `gitstatus` 的运行 summary 现在会显示**远端位置**(origin URL),而不仅是本地仓库路径——让你看清在和哪儿同步/对比。

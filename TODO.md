@@ -45,20 +45,12 @@ targets; (c) gitsync pull phase skips pull-unsafe TARGETs (abort on unsafe MAIN)
 `-ExcludeBranches`. Existing dirty/in-progress tests use MAIN (→ abort), so they stay valid; the change
 is additive for non-main targets.
 
-### Safety regression-locks (highest value; test-only, no production change)
-- **`gitsync push --atomic` meta-scan** — a positive counterpart to `tests/meta/PushForceGuard.Tests.ps1`.
-  `gitsync.ps1`'s single `push --atomic origin <refspecs>` is the *entire* remote-write path, and `--atomic`
-  is the all-or-nothing guarantee that a multi-ref push can't partially clobber a collaborator. It has **zero
-  test coverage** today — the flag (or a split into per-branch pushes) could be removed without turning a
-  single test red. A cheap source-scan closes that silent-degradation hole. *(Do NOT build the runtime
-  rejection/race test — advancing origin pre-run trips the divergence preflight before the push is reached,
-  and the real fetch→push TOCTOU has no injection seam in the black-box harness.)*
-- **`Test-TemporaryWorktreeForCleanup` negative-case tests** (`Merge.psm1`) — this guard is the sole gate
-  before the tool's only destructive `git worktree remove --force`. Existing tests cover only the happy path;
-  the refusal arms (non-matching branch name, mismatched path, locked record, case-sensitive branch compare)
-  have no coverage, so a regression loosening the pattern/path check would be invisible yet could force-remove
-  a user-owned path. Add a unit test asserting `$false` for each refusal arm (the exported-helper unit-test
-  pattern already exists in `InProgressOpPreflight.Tests.ps1`). No production-code change.
+### Safety regression-locks ✅ DONE (v6.7.1; test-only)
+- ✅ **`gitsync push --atomic` meta-scan** (`tests/meta/PushAtomicGuard.Tests.ps1`): every gitsync push is
+  `--atomic`; gitmerge/gitstatus/engine never push. Positive twin of `PushForceGuard`.
+- ✅ **`Test-TemporaryWorktreeForCleanup` negative cases** (`tests/git/TempWorktreeCleanupGuard.Tests.ps1`):
+  refuses empty / non-pattern branch / wrong path / missing record / **locked** worktree; accepts a real
+  unlocked `gitmerge-tmp` worktree (the gate before the only `worktree remove --force`).
 
 ### Deletion-driven simplification (engine + safety tests untouched)
 - **Fold `Common` + `Common.PowerShell7` + `Common.PowerShell51` into one `GitMergeTools.Environment.psm1`**
@@ -152,7 +144,7 @@ is additive for non-main targets.
 - **Features:** capability-gated visual selection + upgrade advisory (surfaced by all three commands —
   gitmerge/gitsync/gitstatus, v5.8.0); display-width helpers.
 - **Tests:** dependency-free harness (no Pester), hermetic sandboxed repos + path-containment guard,
-  smoke/characterization/safety suites, a cross-runtime driver. **100 passing on both runtimes.**
+  smoke/characterization/safety suites, a cross-runtime driver. **103 passing on both runtimes.**
 - **v6.0.0 remote-sync Stage 1:** `Get-RemoteBranchSyncState` classifier (UpToDate/LocalAhead/
   FastForwardable/Diverged) + gitsync REMOTE PULL phase that stops with `ACTION NEEDED` (not an error)
   when origin is ahead/diverged, changing nothing. 7 new tests.
@@ -177,4 +169,6 @@ is additive for non-main targets.
   Helps gitmerge + gitsync (dirty-but-origin-current targets).
 - **v6.7.0 skip-and-proceed (gitsync):** with all/cross-all, gitsync skips a non-main pull-unsafe target
   (dirty / conflicting divergence) via the engine's new `-ExcludeBranches` and syncs the rest; single/
-  current selection or unsafe main still `ACTION NEEDED`. 100 tests. **skip-and-proceed complete.**
+  current selection or unsafe main still `ACTION NEEDED`. **skip-and-proceed complete.**
+- **v6.7.1 safety regression-locks (test-only):** `push --atomic` meta-scan + `Test-TemporaryWorktreeForCleanup`
+  negative cases (the two most dangerous ops). 103 tests.

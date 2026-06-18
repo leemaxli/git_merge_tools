@@ -2,7 +2,7 @@
 
 [:cn: 简体中文](README.md) · :us: **English**
 
-**Current version v6.7.0** · see [Version history](#version-history) below
+**Current version v6.7.1** · see [Version history](#version-history) below
 
 Cross-platform PowerShell helpers for **safe, transactional** local Git branch consolidation —
 with an auto-degrading, capability-aware visual layer. Runs on **PowerShell 7+** (preferred) and
@@ -99,17 +99,18 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # current runtime only
 
 ## Status
 
-Functional and fully tested (all known defects fixed; 100-test suite green on both runtimes). **The
+Functional and fully tested (all known defects fixed; 103-test suite green on both runtimes). **The
 core of the structural refactor is done**: `Core.psm1` (git primitives) and `Merge.psm1` (the
 transactional engine) are extracted, the three commands are thin peers on one engine with no
 cross-command coupling; the remaining environment-module merge and git-safety hardening are in progress.
 
 ## Version history
 
-> Current version: **v6.7.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
+> Current version: **v6.7.1**. Early v1–v3 predate Git tracking and are a summarized retrospective;
 > from v4 on, the history follows the Git commit log.
 
 **v6.x — Remote sync: pull, not just push (current)**
+- **v6.7.1** — Test-only: safety regression-locks for the two most dangerous operations — a meta-scan pinning gitsync's `push --atomic` (and that gitmerge/gitstatus/engine never push), and negative-case tests for `Test-TemporaryWorktreeForCleanup`, the gate before the only `git worktree remove --force`.
 - **v6.7.0** — Skip-and-proceed (gitsync): with `all`/`cross-all`, `gitsync` now **skips** a non-main branch that can't be safely pulled (dirty worktree, or a conflicting divergence) and syncs the rest, instead of aborting the whole run. The skipped branch is excluded from the pull, the consolidation, **and** the push (never force-pushed) and is left untouched. A single explicitly-selected branch, or an unsafe `main`, still stops with `ACTION NEEDED`.
 - **v6.6.0** — Skip-and-proceed (engine): `gitmerge`/`gitsync` with `all`/`cross-all` no longer abort the whole run when a *non-main* target branch's worktree can't safely participate (dirty, or mid-merge/rebase/cherry-pick/revert) — that branch is **skipped with a warning** and the rest still consolidate (consistent with the `#10` sub-branch skip). A dirty or in-progress **main** worktree still aborts, since everything is consolidated through main.
 - **v6.5.0** — The `gitsync` / `gitstatus` run summary now shows the **remote location** (origin URL), not just the local repository path — so you can see where you're syncing/comparing against.
