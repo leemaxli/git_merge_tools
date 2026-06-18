@@ -362,18 +362,22 @@ function gitsync {
                 }
             }
             'Diverged' {
-                $branchWorktree = Find-BranchWorktree $worktrees $branch
-                if ($null -ne $branchWorktree) {
-                    # checked-out divergence is Stage 4b territory; for now it prompts.
-                    $needManual.Add("origin/$branch and local '$branch' have diverged and '$branch' is checked out. Reconcile manually (review/merge), then retry.")
+                $mergeTree = Get-RemoteMergeTree -Repository $repository -Branch $branch
+                if ($null -eq $mergeTree) {
+                    $needManual.Add("origin/$branch and local '$branch' have diverged with conflicts. Reconcile manually (review/merge), then retry.")
                 }
                 else {
-                    $mergeTree = Get-RemoteMergeTree -Repository $repository -Branch $branch
-                    if ($null -ne $mergeTree) {
+                    $branchWorktree = Find-BranchWorktree $worktrees $branch
+                    if ($null -eq $branchWorktree) {
+                        # not checked out -> worktree-free commit-tree + CAS update-ref (Stage 4a).
                         $pullPlan.Add([pscustomobject]@{ Branch = $branch; Method = 'merge-ref'; Worktree = $null; Tree = $mergeTree })
                     }
+                    elseif (Test-CleanWorktree $branchWorktree) {
+                        # checked out + clean -> merge --no-edit in the worktree (Stage 4b).
+                        $pullPlan.Add([pscustomobject]@{ Branch = $branch; Method = 'merge-worktree'; Worktree = $branchWorktree; Tree = $mergeTree })
+                    }
                     else {
-                        $needManual.Add("origin/$branch and local '$branch' have diverged with conflicts. Reconcile manually (review/merge), then retry.")
+                        $needManual.Add("origin/$branch and local '$branch' have diverged, but its worktree ($($branchWorktree.Path)) is not clean (see above). Make it clean, then retry.")
                     }
                 }
             }
@@ -409,6 +413,15 @@ function gitsync {
                 }
                 $mergeCommit = Get-FirstOutputLine $commit
                 $pull = Invoke-GitCommand $repository @('update-ref', '-m', 'gitsync: merge origin', $localRef, $mergeCommit, $oldHash) -MergeError
+            }
+            elseif ($item.Method -eq 'merge-worktree') {
+                # checked out + clean: a real merge in the worktree (already validated clean by merge-tree).
+                $pull = Invoke-GitCommand $item.Worktree.Path @('merge', '--no-edit', $remoteRef) -MergeError
+                if ($pull.ExitCode -ne 0) {
+                    # Defensive: should not happen after a clean merge-tree, but never leave a half-merge behind.
+                    $mergeInProgress = (Invoke-GitCommand $item.Worktree.Path @('rev-parse', '--verify', '-q', 'MERGE_HEAD') -SuppressError).ExitCode -eq 0
+                    if ($mergeInProgress) { [void](Invoke-GitCommand $item.Worktree.Path @('merge', '--abort') -MergeError) }
+                }
             }
             else {
                 $pull = Invoke-GitCommand $item.Worktree.Path @('merge', '--ff-only', $remoteRef) -MergeError

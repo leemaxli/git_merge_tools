@@ -2,7 +2,7 @@
 
 [:cn: 简体中文](README.md) · :us: **English**
 
-**Current version v6.3.0** · see [Version history](#version-history) below
+**Current version v6.4.0** · see [Version history](#version-history) below
 
 Cross-platform PowerShell helpers for **safe, transactional** local Git branch consolidation —
 with an auto-degrading, capability-aware visual layer. Runs on **PowerShell 7+** (preferred) and
@@ -99,17 +99,18 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # current runtime only
 
 ## Status
 
-Functional and fully tested (all known defects fixed; 89-test suite green on both runtimes). **The
+Functional and fully tested (all known defects fixed; 91-test suite green on both runtimes). **The
 core of the structural refactor is done**: `Core.psm1` (git primitives) and `Merge.psm1` (the
 transactional engine) are extracted, the three commands are thin peers on one engine with no
 cross-command coupling; the remaining environment-module merge and git-safety hardening are in progress.
 
 ## Version history
 
-> Current version: **v6.3.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
+> Current version: **v6.4.0**. Early v1–v3 predate Git tracking and are a summarized retrospective;
 > from v4 on, the history follows the Git commit log.
 
 **v6.x — Remote sync: pull, not just push (current)**
+- **v6.4.0** — Stage 4 (checked-out): the divergent clean-merge auto-sync now also covers a **checked-out branch with a clean worktree** — the common case where your *current* branch has diverged from origin — applied via `merge --no-edit` after the same in-memory `merge-tree` validation. A dirty worktree or a conflicting merge still prompts. This completes the safe-sync rollout: `gitsync` now auto-pulls/merges every case it can do without risking your work (fast-forwards and conflict-free merges), and prompts for the rest (dirty worktree, conflicting divergence) — never resetting, rebasing, or force-pushing.
 - **v6.3.0** — Stage 4 (not-checked-out): `gitsync` auto-*merges* a **not-checked-out** branch that has diverged from origin **when the merge is clean** — validated in-memory with `git merge-tree` (no worktree touched, no ref changed), then applied worktree-free via `commit-tree` + a compare-and-swap `update-ref`. Conflicting divergences are never auto-resolved; they still prompt.
 - **v6.2.0** — Stage 3: `gitsync` also auto fast-forward-pulls a branch that *is* checked out, when its worktree is **clean** (via `merge --ff-only` in that worktree) — covering the common case of the current branch trailing origin. A dirty worktree is never touched; it still prompts.
 - **v6.1.0** — Stage 2: `gitsync` now *auto* fast-forward-pulls a branch that origin is ahead of when that branch is **not checked out** in any worktree (a compare-and-swap `update-ref` — the safest pull, no working tree to disturb). The REMOTE PULL phase is all-or-nothing: it classifies every branch read-only first, and if any branch still can't be safely synced (a checked-out fast-forward, or a divergence) it changes nothing and prompts.

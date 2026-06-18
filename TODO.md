@@ -21,9 +21,11 @@ was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; 
   (`merge --ff-only`); dirty worktree still prompts (never touched).
 - ✅ **v6.3.0 — Stage 4 (not-checked-out, done):** `Diverged` + not checked out + **clean merge**
   (validated in-memory via `git merge-tree`) → worktree-free `commit-tree` + CAS `update-ref`.
-- ⏳ **Stage 4b:** `Diverged` + checked-out + clean worktree + clean merge → `merge --no-edit` in the
-  worktree (validated by `merge-tree` first). Conflicts / dirty still prompt.
-- Stage 5 (unsafe/conflict) is out of scope — always prompts.
+- ✅ **v6.4.0 — Stage 4b (done):** `Diverged` + checked-out + clean worktree + clean merge →
+  `merge --no-edit` in the worktree (validated by `merge-tree` first). Conflicts / dirty still prompt.
+- **Safe-sync rollout COMPLETE.** gitsync auto-handles every case it can do without risking work
+  (FF + conflict-free merges); dirty worktrees and conflicting divergences prompt (ACTION NEEDED).
+- Stage 5 (unsafe/conflict) is out of scope — always prompts (never reset/rebase/force/auto-resolve).
 
 ### Safety regression-locks (highest value; test-only, no production change)
 - **`gitsync push --atomic` meta-scan** — a positive counterpart to `tests/meta/PushForceGuard.Tests.ps1`.
@@ -132,7 +134,7 @@ was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; 
 - **Features:** capability-gated visual selection + upgrade advisory (surfaced by all three commands —
   gitmerge/gitsync/gitstatus, v5.8.0); display-width helpers.
 - **Tests:** dependency-free harness (no Pester), hermetic sandboxed repos + path-containment guard,
-  smoke/characterization/safety suites, a cross-runtime driver. **89 passing on both runtimes.**
+  smoke/characterization/safety suites, a cross-runtime driver. **91 passing on both runtimes.**
 - **v6.0.0 remote-sync Stage 1:** `Get-RemoteBranchSyncState` classifier (UpToDate/LocalAhead/
   FastForwardable/Diverged) + gitsync REMOTE PULL phase that stops with `ACTION NEEDED` (not an error)
   when origin is ahead/diverged, changing nothing. 7 new tests.
@@ -143,4 +145,7 @@ was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; 
   prompt case).
 - **v6.3.0 remote-sync Stage 4 (not-checked-out):** auto clean-merge of a not-checked-out diverged
   branch — `Get-RemoteMergeTree` (in-memory `merge-tree` validate) + worktree-free `commit-tree` +
-  CAS `update-ref`. Conflicting divergence still prompts. 89 tests.
+  CAS `update-ref`. Conflicting divergence still prompts.
+- **v6.4.0 remote-sync Stage 4b (checked-out):** auto clean-merge of a checked-out clean-worktree
+  diverged branch via `merge --no-edit` in the worktree (merge-tree-validated). Dirty/conflict prompt.
+  Safe-sync rollout complete. 91 tests.
