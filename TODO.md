@@ -19,7 +19,10 @@ was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; 
   (CAS `update-ref`); all-or-nothing (classify read-only first; any unsafe branch → prompt, change nothing).
 - ✅ **v6.2.0 — Stage 3 (done):** FF-pull a checked-out branch with a **clean** worktree
   (`merge --ff-only`); dirty worktree still prompts (never touched).
-- ⏳ **Stage 4:** `Diverged` but **no-conflict** → throwaway-worktree-validated merge, then advance.
+- ✅ **v6.3.0 — Stage 4 (not-checked-out, done):** `Diverged` + not checked out + **clean merge**
+  (validated in-memory via `git merge-tree`) → worktree-free `commit-tree` + CAS `update-ref`.
+- ⏳ **Stage 4b:** `Diverged` + checked-out + clean worktree + clean merge → `merge --no-edit` in the
+  worktree (validated by `merge-tree` first). Conflicts / dirty still prompt.
 - Stage 5 (unsafe/conflict) is out of scope — always prompts.
 
 ### Safety regression-locks (highest value; test-only, no production change)
@@ -129,7 +132,7 @@ was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; 
 - **Features:** capability-gated visual selection + upgrade advisory (surfaced by all three commands —
   gitmerge/gitsync/gitstatus, v5.8.0); display-width helpers.
 - **Tests:** dependency-free harness (no Pester), hermetic sandboxed repos + path-containment guard,
-  smoke/characterization/safety suites, a cross-runtime driver. **87 passing on both runtimes.**
+  smoke/characterization/safety suites, a cross-runtime driver. **89 passing on both runtimes.**
 - **v6.0.0 remote-sync Stage 1:** `Get-RemoteBranchSyncState` classifier (UpToDate/LocalAhead/
   FastForwardable/Diverged) + gitsync REMOTE PULL phase that stops with `ACTION NEEDED` (not an error)
   when origin is ahead/diverged, changing nothing. 7 new tests.
@@ -137,4 +140,7 @@ was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; 
   all-or-nothing classify-then-pull. (`GitSyncFfPull.Tests.ps1`).
 - **v6.2.0 remote-sync Stage 3:** auto FF-pull of a checked-out CLEAN branch via `merge --ff-only`
   (dirty worktree still prompts). Tests use stable scenarios (conflicting-divergence = the permanent
-  prompt case). 87 tests.
+  prompt case).
+- **v6.3.0 remote-sync Stage 4 (not-checked-out):** auto clean-merge of a not-checked-out diverged
+  branch — `Get-RemoteMergeTree` (in-memory `merge-tree` validate) + worktree-free `commit-tree` +
+  CAS `update-ref`. Conflicting divergence still prompts. 89 tests.

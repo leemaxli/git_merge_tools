@@ -86,6 +86,26 @@ function Get-RemoteBranchSyncState {
     return 'Diverged'
 }
 
+function Get-RemoteMergeTree {
+    # In-memory merge probe for the gitsync REMOTE PULL phase (Stage 4): would merging origin/<Branch>
+    # into local <Branch> apply with NO conflict?  `git merge-tree --write-tree` performs a real merge
+    # entirely in the object store -- it touches NO worktree and changes NO ref -- exiting 0 (and printing
+    # the merged tree OID) when clean, or 1 when conflicting. Returns the merged tree OID on a clean merge,
+    # else $null. The caller turns that tree into a merge commit (commit-tree) only when it decides to apply.
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$Repository,
+        [Parameter(Mandatory)][string]$Branch
+    )
+
+    $result = Invoke-GitCommand $Repository @(
+        'merge-tree', '--write-tree', "refs/heads/$Branch", "refs/remotes/origin/$Branch"
+    ) -MergeError
+    if ($result.ExitCode -ne 0) { return $null }   # 1 = conflict, >1 = error -> not cleanly mergeable
+    return Get-FirstOutputLine $result
+}
+
 function Test-CleanWorktree {
     param([Parameter(Mandatory)]$Worktree)
     if ($Worktree.Locked) {
@@ -694,6 +714,7 @@ function Invoke-GitMergeConsolidation {
 Export-ModuleMember -Function @(
     'Get-WorktreeInProgressOperation',
     'Get-RemoteBranchSyncState',
+    'Get-RemoteMergeTree',
     'Test-CleanWorktree',
     'Test-TemporaryWorktreeForCleanup',
     'Invoke-TemporaryCleanup',

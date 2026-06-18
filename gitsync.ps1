@@ -362,7 +362,20 @@ function gitsync {
                 }
             }
             'Diverged' {
-                $needManual.Add("origin/$branch and local '$branch' have diverged. Reconcile manually (review/merge), then retry.")
+                $branchWorktree = Find-BranchWorktree $worktrees $branch
+                if ($null -ne $branchWorktree) {
+                    # checked-out divergence is Stage 4b territory; for now it prompts.
+                    $needManual.Add("origin/$branch and local '$branch' have diverged and '$branch' is checked out. Reconcile manually (review/merge), then retry.")
+                }
+                else {
+                    $mergeTree = Get-RemoteMergeTree -Repository $repository -Branch $branch
+                    if ($null -ne $mergeTree) {
+                        $pullPlan.Add([pscustomobject]@{ Branch = $branch; Method = 'merge-ref'; Worktree = $null; Tree = $mergeTree })
+                    }
+                    else {
+                        $needManual.Add("origin/$branch and local '$branch' have diverged with conflicts. Reconcile manually (review/merge), then retry.")
+                    }
+                }
             }
         }
     }
@@ -377,11 +390,25 @@ function gitsync {
         Write-Stage -Title 'REMOTE PULL' -Subtitle 'Fast-forward local branches from origin (safe: not checked out, or checked out and clean)' -StageIcon 'REMOTE'
         foreach ($item in $pullPlan) {
             $remoteRef = "refs/remotes/origin/$($item.Branch)"
+            $localRef = "refs/heads/$($item.Branch)"
             if ($item.Method -eq 'ref') {
-                $localRef = "refs/heads/$($item.Branch)"
                 $oldHash = Get-RefHash $repository $localRef
                 $newHash = Get-RefHash $repository $remoteRef
                 $pull = Invoke-GitCommand $repository @('update-ref', '-m', 'gitsync: fast-forward from origin', $localRef, $newHash, $oldHash) -MergeError
+            }
+            elseif ($item.Method -eq 'merge-ref') {
+                # Worktree-free clean merge (not checked out): turn the merge-tree-validated tree into a
+                # merge commit (commit-tree), then advance the branch with a compare-and-swap update-ref.
+                $oldHash = Get-RefHash $repository $localRef
+                $remoteHash = Get-RefHash $repository $remoteRef
+                $commit = Invoke-GitCommand $repository @('commit-tree', $item.Tree, '-p', $oldHash, '-p', $remoteHash, '-m', "Merge origin/$($item.Branch) into $($item.Branch)") -MergeError
+                if ($commit.ExitCode -ne 0) {
+                    Write-GitFailure "Cannot create the merge commit for '$($item.Branch)'" $commit
+                    $failureReason = "Failed to merge origin/$($item.Branch) into '$($item.Branch)'."
+                    return $false
+                }
+                $mergeCommit = Get-FirstOutputLine $commit
+                $pull = Invoke-GitCommand $repository @('update-ref', '-m', 'gitsync: merge origin', $localRef, $mergeCommit, $oldHash) -MergeError
             }
             else {
                 $pull = Invoke-GitCommand $item.Worktree.Path @('merge', '--ff-only', $remoteRef) -MergeError
@@ -391,7 +418,8 @@ function gitsync {
                 $failureReason = "Failed to fast-forward '$($item.Branch)' from origin."
                 return $false
             }
-            Write-StatusLine -Marker '✓' -Message "Pulled origin/$($item.Branch) into local '$($item.Branch)' (fast-forward)." -Color Green
+            $how = if ($item.Method -eq 'merge-ref') { 'clean merge' } else { 'fast-forward' }
+            Write-StatusLine -Marker '✓' -Message "Pulled origin/$($item.Branch) into local '$($item.Branch)' ($how)." -Color Green
         }
     }
     Write-StatusLine -Marker '✓' -Message "Remote is in sync or behind local for: $($pushBranches -join ', '). Proceeding." -Color Green
