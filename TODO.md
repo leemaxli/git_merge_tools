@@ -30,8 +30,10 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
   keyword.
 
 ### P4 — verification
-- Encoding/i18n edge tests (non-English `LANG`, non-ASCII branch names, Unicode/space repo paths) — these
-  guard the actual dev environment (cp936/GBK on Windows).
+- Encoding/i18n edge tests: non-ASCII branch names (done — `Utf8BranchCapture`) and Unicode/space repo
+  paths (done — `I18nRepoPath`, v5.9.0) guard the cp936/GBK Windows dev env. **Remaining:** a non-English
+  `LANG`/`LC_ALL` test (the tools already key on exit codes + `--porcelain`, so this only pins that
+  convention against regression).
 
 ## Descoped — over-engineered for a solo 3-command tool (deliberately NOT building)
 - **`max` raw-ANSI/OSC effects** (truecolor gradients, OSC 8 / OSC 9;4, rounded panels): the only
@@ -76,4 +78,4 @@ been cut or deferred. What remains is the cheap, high-value core plus deletion-d
 - **Features:** capability-gated visual selection + upgrade advisory (surfaced by all three commands —
   gitmerge/gitsync/gitstatus, v5.8.0); display-width helpers.
 - **Tests:** dependency-free harness (no Pester), hermetic sandboxed repos + path-containment guard,
-  smoke/characterization/safety suites, a cross-runtime driver. **71 passing on both runtimes.**
+  smoke/characterization/safety suites, a cross-runtime driver. **74 passing on both runtimes.**
