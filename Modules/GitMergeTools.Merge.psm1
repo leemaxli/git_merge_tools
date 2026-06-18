@@ -86,6 +86,33 @@ function Get-RemoteBranchSyncState {
     return 'Diverged'
 }
 
+function Move-BranchRefSafely {
+    # Advance a local branch to NewHash with a compare-and-swap update-ref, but ONLY if BOTH hold:
+    #   (a) NewHash is a true fast-forward of ExpectedOldHash (descends it) -- never orphans a commit; and
+    #   (b) the ref is still exactly ExpectedOldHash (the value the decision was based on).
+    # The gitsync worktree-free pull paths ('ref' fast-forward, 'merge-ref' clean-merge) call this with the
+    # hashes captured at classify time, so a branch advanced by a concurrent writer between classify and
+    # apply makes (b) fail and we refuse, changing nothing -- closing the between-pass data-loss race.
+    # Returns $true only when the ref was advanced. Mirrors Invoke-BranchFastForward's ancestor+CAS guard.
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][string]$Repository,
+        [Parameter(Mandatory)][string]$Branch,
+        [Parameter(Mandatory)][string]$ExpectedOldHash,
+        [Parameter(Mandatory)][string]$NewHash
+    )
+
+    if ($ExpectedOldHash -eq $NewHash) { return $true }   # already there; nothing to do
+    if (-not (Test-Ancestor -Repository $Repository -Ancestor $ExpectedOldHash -Descendant $NewHash)) {
+        return $false   # not a fast-forward of the decided-on tip -> never move sideways
+    }
+    $update = Invoke-GitCommand $Repository @(
+        'update-ref', '-m', 'gitsync: sync from origin', "refs/heads/$Branch", $NewHash, $ExpectedOldHash
+    ) -MergeError
+    return ($update.ExitCode -eq 0)   # CAS: fails (no change) if the ref moved off ExpectedOldHash
+}
+
 function Get-RemoteMergeTree {
     # In-memory merge probe for the gitsync REMOTE PULL phase (Stage 4): would merging origin/<Branch>
     # into local <Branch> apply with NO conflict?  `git merge-tree --write-tree` performs a real merge
@@ -715,6 +742,7 @@ Export-ModuleMember -Function @(
     'Get-WorktreeInProgressOperation',
     'Get-RemoteBranchSyncState',
     'Get-RemoteMergeTree',
+    'Move-BranchRefSafely',
     'Test-CleanWorktree',
     'Test-TemporaryWorktreeForCleanup',
     'Invoke-TemporaryCleanup',

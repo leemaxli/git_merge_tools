@@ -23,9 +23,17 @@ was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; 
   (validated in-memory via `git merge-tree`) → worktree-free `commit-tree` + CAS `update-ref`.
 - ✅ **v6.4.0 — Stage 4b (done):** `Diverged` + checked-out + clean worktree + clean merge →
   `merge --no-edit` in the worktree (validated by `merge-tree` first). Conflicts / dirty still prompt.
+- ✅ **v6.4.1 — concurrency safety fix (done; found by adversarial review):** the worktree-free pull
+  paths CAS against the **classify-time** tip via `Move-BranchRefSafely` (FF-guarded), closing a
+  between-pass race that could orphan a concurrent commit or commit a stale merge tree.
 - **Safe-sync rollout COMPLETE.** gitsync auto-handles every case it can do without risking work
   (FF + conflict-free merges); dirty worktrees and conflicting divergences prompt (ACTION NEEDED).
 - Stage 5 (unsafe/conflict) is out of scope — always prompts (never reset/rebase/force/auto-resolve).
+- *(Deferred, benign — adversarial-review finding #3):* if the REMOTE PULL phase applies pulls and the
+  later consolidation engine then fails, the pulled branches stay advanced (forward-only, no work lost,
+  nothing pushed) and the `✓ Pulled` lines show it — only the looser "any failure changes nothing"
+  aspiration is dented. A rollback ledger to make it strictly atomic is **not** built (over-engineering
+  for a benign, non-lossy outcome on a solo tool).
 
 ### Safety regression-locks (highest value; test-only, no production change)
 - **`gitsync push --atomic` meta-scan** — a positive counterpart to `tests/meta/PushForceGuard.Tests.ps1`.
@@ -134,7 +142,7 @@ was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; 
 - **Features:** capability-gated visual selection + upgrade advisory (surfaced by all three commands —
   gitmerge/gitsync/gitstatus, v5.8.0); display-width helpers.
 - **Tests:** dependency-free harness (no Pester), hermetic sandboxed repos + path-containment guard,
-  smoke/characterization/safety suites, a cross-runtime driver. **91 passing on both runtimes.**
+  smoke/characterization/safety suites, a cross-runtime driver. **94 passing on both runtimes.**
 - **v6.0.0 remote-sync Stage 1:** `Get-RemoteBranchSyncState` classifier (UpToDate/LocalAhead/
   FastForwardable/Diverged) + gitsync REMOTE PULL phase that stops with `ACTION NEEDED` (not an error)
   when origin is ahead/diverged, changing nothing. 7 new tests.
@@ -148,4 +156,7 @@ was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; 
   CAS `update-ref`. Conflicting divergence still prompts.
 - **v6.4.0 remote-sync Stage 4b (checked-out):** auto clean-merge of a checked-out clean-worktree
   diverged branch via `merge --no-edit` in the worktree (merge-tree-validated). Dirty/conflict prompt.
-  Safe-sync rollout complete. 91 tests.
+  Safe-sync rollout complete.
+- **v6.4.1 concurrency safety fix:** `Move-BranchRefSafely` (FF-guarded CAS against the classify-time
+  tip) for the worktree-free pull paths — closes a between-pass race (orphaned commit / stale merge tree)
+  found by an adversarial review. 94 tests.

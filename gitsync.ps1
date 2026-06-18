@@ -352,7 +352,13 @@ function gitsync {
             'FastForwardable' {
                 $branchWorktree = Find-BranchWorktree $worktrees $branch
                 if ($null -eq $branchWorktree) {
-                    $pullPlan.Add([pscustomobject]@{ Branch = $branch; Method = 'ref'; Worktree = $null })
+                    # Capture the tips the FF decision is based on; the apply CAS-checks against these so a
+                    # concurrent move between classify and apply refuses instead of orphaning a commit.
+                    $pullPlan.Add([pscustomobject]@{
+                            Branch = $branch; Method = 'ref'; Worktree = $null
+                            LocalHash = (Get-RefHash $repository "refs/heads/$branch")
+                            RemoteHash = (Get-RefHash $repository "refs/remotes/origin/$branch")
+                        })
                 }
                 elseif (Test-CleanWorktree $branchWorktree) {
                     $pullPlan.Add([pscustomobject]@{ Branch = $branch; Method = 'worktree'; Worktree = $branchWorktree })
@@ -369,8 +375,14 @@ function gitsync {
                 else {
                     $branchWorktree = Find-BranchWorktree $worktrees $branch
                     if ($null -eq $branchWorktree) {
-                        # not checked out -> worktree-free commit-tree + CAS update-ref (Stage 4a).
-                        $pullPlan.Add([pscustomobject]@{ Branch = $branch; Method = 'merge-ref'; Worktree = $null; Tree = $mergeTree })
+                        # not checked out -> worktree-free commit-tree + CAS update-ref (Stage 4a). Capture
+                        # the exact tips the merge tree was computed from; the apply builds the merge commit
+                        # on, and CAS-checks against, these -- so a concurrent move refuses (no stale tree).
+                        $pullPlan.Add([pscustomobject]@{
+                                Branch = $branch; Method = 'merge-ref'; Worktree = $null; Tree = $mergeTree
+                                LocalHash = (Get-RefHash $repository "refs/heads/$branch")
+                                RemoteHash = (Get-RefHash $repository "refs/remotes/origin/$branch")
+                            })
                     }
                     elseif (Test-CleanWorktree $branchWorktree) {
                         # checked out + clean -> merge --no-edit in the worktree (Stage 4b).
@@ -394,44 +406,54 @@ function gitsync {
         Write-Stage -Title 'REMOTE PULL' -Subtitle 'Fast-forward local branches from origin (safe: not checked out, or checked out and clean)' -StageIcon 'REMOTE'
         foreach ($item in $pullPlan) {
             $remoteRef = "refs/remotes/origin/$($item.Branch)"
-            $localRef = "refs/heads/$($item.Branch)"
             if ($item.Method -eq 'ref') {
-                $oldHash = Get-RefHash $repository $localRef
-                $newHash = Get-RefHash $repository $remoteRef
-                $pull = Invoke-GitCommand $repository @('update-ref', '-m', 'gitsync: fast-forward from origin', $localRef, $newHash, $oldHash) -MergeError
+                # Worktree-free fast-forward: CAS against the CAPTURED Pass-1 local tip (Move-BranchRefSafely
+                # refuses, changing nothing, if the branch moved concurrently or the move isn't a true FF).
+                if (-not (Move-BranchRefSafely -Repository $repository -Branch $item.Branch -ExpectedOldHash $item.LocalHash -NewHash $item.RemoteHash)) {
+                    $failureReason = "origin/$($item.Branch) could not be fast-forwarded safely: local '$($item.Branch)' changed during the sync. Nothing was pushed; re-run gitsync."
+                    Write-Warning $failureReason
+                    return $false
+                }
             }
             elseif ($item.Method -eq 'merge-ref') {
-                # Worktree-free clean merge (not checked out): turn the merge-tree-validated tree into a
-                # merge commit (commit-tree), then advance the branch with a compare-and-swap update-ref.
-                $oldHash = Get-RefHash $repository $localRef
-                $remoteHash = Get-RefHash $repository $remoteRef
-                $commit = Invoke-GitCommand $repository @('commit-tree', $item.Tree, '-p', $oldHash, '-p', $remoteHash, '-m', "Merge origin/$($item.Branch) into $($item.Branch)") -MergeError
+                # Worktree-free clean merge (not checked out): build the merge commit on the CAPTURED local
+                # tip (so its tree matches the merge-tree-validated tree), then CAS-advance against that tip.
+                $commit = Invoke-GitCommand $repository @('commit-tree', $item.Tree, '-p', $item.LocalHash, '-p', $item.RemoteHash, '-m', "Merge origin/$($item.Branch) into $($item.Branch)") -MergeError
                 if ($commit.ExitCode -ne 0) {
                     Write-GitFailure "Cannot create the merge commit for '$($item.Branch)'" $commit
                     $failureReason = "Failed to merge origin/$($item.Branch) into '$($item.Branch)'."
                     return $false
                 }
                 $mergeCommit = Get-FirstOutputLine $commit
-                $pull = Invoke-GitCommand $repository @('update-ref', '-m', 'gitsync: merge origin', $localRef, $mergeCommit, $oldHash) -MergeError
+                if (-not (Move-BranchRefSafely -Repository $repository -Branch $item.Branch -ExpectedOldHash $item.LocalHash -NewHash $mergeCommit)) {
+                    $failureReason = "origin/$($item.Branch) could not be merged safely: local '$($item.Branch)' changed during the sync. Nothing was pushed; re-run gitsync."
+                    Write-Warning $failureReason
+                    return $false
+                }
             }
             elseif ($item.Method -eq 'merge-worktree') {
                 # checked out + clean: a real merge in the worktree (already validated clean by merge-tree).
-                $pull = Invoke-GitCommand $item.Worktree.Path @('merge', '--no-edit', $remoteRef) -MergeError
-                if ($pull.ExitCode -ne 0) {
+                # git merge re-validates against the LIVE worktree tip, so a concurrent change fails safely.
+                $merge = Invoke-GitCommand $item.Worktree.Path @('merge', '--no-edit', $remoteRef) -MergeError
+                if ($merge.ExitCode -ne 0) {
                     # Defensive: should not happen after a clean merge-tree, but never leave a half-merge behind.
                     $mergeInProgress = (Invoke-GitCommand $item.Worktree.Path @('rev-parse', '--verify', '-q', 'MERGE_HEAD') -SuppressError).ExitCode -eq 0
                     if ($mergeInProgress) { [void](Invoke-GitCommand $item.Worktree.Path @('merge', '--abort') -MergeError) }
+                    Write-GitFailure "Cannot merge origin/$($item.Branch) into '$($item.Branch)'" $merge
+                    $failureReason = "Failed to merge origin/$($item.Branch) into '$($item.Branch)'."
+                    return $false
                 }
             }
             else {
-                $pull = Invoke-GitCommand $item.Worktree.Path @('merge', '--ff-only', $remoteRef) -MergeError
+                # 'worktree' = fast-forward in the checked-out worktree; merge --ff-only re-validates live.
+                $merge = Invoke-GitCommand $item.Worktree.Path @('merge', '--ff-only', $remoteRef) -MergeError
+                if ($merge.ExitCode -ne 0) {
+                    Write-GitFailure "Cannot fast-forward '$($item.Branch)' from origin/$($item.Branch)" $merge
+                    $failureReason = "Failed to fast-forward '$($item.Branch)' from origin."
+                    return $false
+                }
             }
-            if ($pull.ExitCode -ne 0) {
-                Write-GitFailure "Cannot fast-forward '$($item.Branch)' from origin/$($item.Branch)" $pull
-                $failureReason = "Failed to fast-forward '$($item.Branch)' from origin."
-                return $false
-            }
-            $how = if ($item.Method -eq 'merge-ref') { 'clean merge' } else { 'fast-forward' }
+            $how = if ($item.Method -eq 'merge-ref' -or $item.Method -eq 'merge-worktree') { 'clean merge' } else { 'fast-forward' }
             Write-StatusLine -Marker '✓' -Message "Pulled origin/$($item.Branch) into local '$($item.Branch)' ($how)." -Color Green
         }
     }
