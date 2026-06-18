@@ -137,6 +137,15 @@ function Test-LocalBranch {
     return ($result.ExitCode -eq 0)
 }
 
+function Get-RemoteUrl {
+    # The configured URL of a remote (default 'origin'), or $null if the remote does not exist. Used by the
+    # run summaries to show WHERE the command is syncing/comparing against, not just the local repo path.
+    param([string]$Repository, [string]$Remote = 'origin')
+    $result = Invoke-GitCommand $Repository @('remote', 'get-url', $Remote) -SuppressError
+    if ($result.ExitCode -ne 0) { return $null }
+    return Get-FirstOutputLine $result
+}
+
 function Get-CurrentBranch {
     param([string]$Repository)
     $result = Invoke-GitCommand $Repository @(
@@ -259,6 +268,7 @@ Export-ModuleMember -Function @(
     'Get-FirstOutputLine',
     'Write-GitFailure',
     'Test-LocalBranch',
+    'Get-RemoteUrl',
     'Get-CurrentBranch',
     'Get-LocalBranch',
     'Get-WorktreeRecord',

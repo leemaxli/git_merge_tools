@@ -35,6 +35,19 @@ was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; 
   aspiration is dented. A rollback ledger to make it strictly atomic is **not** built (over-engineering
   for a benign, non-lossy outcome on a solo tool).
 
+### Open design question — gitsync/gitmerge all-or-nothing vs skip-and-proceed (raised 2026-06-18, user)
+- **Current (intentional, not a bug):** with `all`/`cross-all`, if ANY selected branch can't safely
+  participate (dirty worktree, conflicting divergence, etc.), the whole run aborts (`ACTION NEEDED` /
+  engine clean-worktree preflight) and **nothing** is synced — the transactional all-or-nothing model
+  (HARD CONSTRAINT: "main advances only after EVERY requested merge succeeds; any failure changes nothing").
+- **User's expectation:** sync the branches that CAN sync; skip the one(s) that can't. There is precedent
+  — the `#10` sub-branch skip already excludes ineligible branches and proceeds.
+- **If we change it (skip-and-proceed):** SKIP a pull-/consolidate-unsafe TARGET branch (exclude from pull
+  + consolidation + push, with a warning), proceed with the rest; still ABORT if `main` itself is unsafe
+  (everything routes through main). Safe (skipping touches nothing) but touches the core engine's
+  clean-worktree preflight (heavily safety-tested) and softens the documented HARD-CONSTRAINT wording from
+  "every requested" to "every eligible" (which `#10` already implies). **Awaiting user decision.**
+
 ### Safety regression-locks (highest value; test-only, no production change)
 - **`gitsync push --atomic` meta-scan** — a positive counterpart to `tests/meta/PushForceGuard.Tests.ps1`.
   `gitsync.ps1`'s single `push --atomic origin <refspecs>` is the *entire* remote-write path, and `--atomic`
@@ -142,7 +155,7 @@ was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; 
 - **Features:** capability-gated visual selection + upgrade advisory (surfaced by all three commands —
   gitmerge/gitsync/gitstatus, v5.8.0); display-width helpers.
 - **Tests:** dependency-free harness (no Pester), hermetic sandboxed repos + path-containment guard,
-  smoke/characterization/safety suites, a cross-runtime driver. **94 passing on both runtimes.**
+  smoke/characterization/safety suites, a cross-runtime driver. **97 passing on both runtimes.**
 - **v6.0.0 remote-sync Stage 1:** `Get-RemoteBranchSyncState` classifier (UpToDate/LocalAhead/
   FastForwardable/Diverged) + gitsync REMOTE PULL phase that stops with `ACTION NEEDED` (not an error)
   when origin is ahead/diverged, changing nothing. 7 new tests.
@@ -159,4 +172,6 @@ was ahead. Staged rollout (safest cases first), each a small TDD'd sub-version; 
   Safe-sync rollout complete.
 - **v6.4.1 concurrency safety fix:** `Move-BranchRefSafely` (FF-guarded CAS against the classify-time
   tip) for the worktree-free pull paths — closes a between-pass race (orphaned commit / stale merge tree)
-  found by an adversarial review. 94 tests.
+  found by an adversarial review.
+- **v6.5.0 summary remote location:** `gitsync`/`gitstatus` run summary shows the origin URL
+  (`Get-RemoteUrl` in Core), not just the local path. 97 tests.

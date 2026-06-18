@@ -2,7 +2,7 @@
 
 :cn: **简体中文** · [:us: English](README.en.md)
 
-**当前版本 v6.4.1** · 见下方[版本历史](#版本历史)
+**当前版本 v6.5.0** · 见下方[版本历史](#版本历史)
 
 跨平台 PowerShell 工具,用于**安全、事务式**地在本地把 Git 分支经 main 整合,并带一套按终端能力
 自动降级的视觉层。可运行于 **PowerShell 7+**(优先)与 **Windows PowerShell 5.1**,支持
@@ -94,15 +94,16 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # 仅当前运行时
 
 ## 状态
 
-功能完整、测试充分(已知缺陷全部修复;两运行时 94 项测试全绿)。**结构性重构主体已完成**:已抽出
+功能完整、测试充分(已知缺陷全部修复;两运行时 97 项测试全绿)。**结构性重构主体已完成**:已抽出
 `Core.psm1`(git 原语)与 `Merge.psm1`(事务引擎),三条命令成为同一引擎上的薄壳并去除了命令间耦合;
 后续的环境模块合并与 git 安全加固按路线图推进中。
 
 ## 版本历史
 
-> 当前版本:**v6.4.1**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
+> 当前版本:**v6.5.0**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
 
 **v6.x —— 远端同步:不止 push,还能 pull(当前)**
+- **v6.5.0** —— `gitsync` / `gitstatus` 的运行 summary 现在会显示**远端位置**(origin URL),而不仅是本地仓库路径——让你看清在和哪儿同步/对比。
 - **v6.4.1** —— 安全修复(由对 v6.x 代码的对抗式审查发现):两条无 worktree 的 pull 路径现在对**分类时捕获**的分支 tip 做 compare-and-swap(经新的 `Move-BranchRefSafely`,带真正的 fast-forward 守护),而非重新读取的 tip。这堵住了一个跨阶段竞态:在两阶段之间被**并发**写入推进的分支可能被横向强移(丢弃新提交)或合并到陈旧树上。已 checkout 的路径本就安全(实时 `git merge` 会重新校验)。
 - **v6.4.0** —— Stage 4(已 checkout):分叉无冲突自动合并现在也覆盖**已 checkout 且工作树干净**的分支(最常见情形——你的*当前*分支与 origin 分叉),在同样的 `merge-tree` 内存验证后用 `merge --no-edit` 应用。工作树脏或合并有冲突仍提示。至此安全同步全部落地:`gitsync` 会自动 pull/merge 所有不冒险丢失你工作的情形(fast-forward 与无冲突合并),其余(工作树脏、冲突分叉)则提示——绝不 reset、rebase 或 force-push。
 - **v6.3.0** —— Stage 4(未 checkout 分支):对**未 checkout** 且已与 origin 分叉的分支,`gitsync` 在**合并无冲突**时自动**合并** —— 用 `git merge-tree` 在内存中验证(不碰 worktree、不动 ref),再用 `commit-tree` + compare-and-swap `update-ref` 无 worktree 地应用。有冲突的分叉绝不自动解决,仍提示。
@@ -110,19 +111,11 @@ pwsh tests/Invoke-GitMergeToolsTests.ps1   # 仅当前运行时
 - **v6.1.0** —— Stage 2:当 origin 领先的分支**未在任何 worktree 被 checkout** 时,`gitsync` 现在会自动 fast-forward 拉取它(compare-and-swap `update-ref` —— 最安全的 pull,没有工作树需要扰动)。REMOTE PULL 阶段 all-or-nothing:先对所有分支只读分类,只要还有任一分支无法安全同步(已 checkout 的 fast-forward,或已分叉),就不改动任何东西并提示。
 - **v6.0.0** —— 关键缺失修复:`gitsync` 不再在 `origin` 领先于(或分叉于)本地分支时硬性报错。新增 **REMOTE PULL 阶段**,对每个将同步的分支分类(`UpToDate`/`LocalAhead`/`FastForwardable`/`Diverged`),需要 pull 时以可操作的 **`ACTION NEEDED`** 提示(如 `git pull --ff-only origin <分支>`)停下 —— 且不改动任何东西 —— 取代晦涩的失败。这是分阶段推出的 Stage 1;安全的**自动 pull**(先 fast-forward,再用临时 worktree 验证的干净合并)将随后续 v6.x 子版本到来。`gitmerge` 不变。
 
-**v5.x —— 模块化、引擎统一与持续加固**
-- **v5.10.0** —— git 安全/去重:`gitsync` 现在严格按合并引擎报告的已同步集合推送(引擎是 #10 子分支跳过的唯一真源),而非独立重算的集合 —— 消除推送/跳过分歧风险。移除了引擎上已失效的 `-RemoteAlreadyFetched` 参数。行为等价,由既有 gitsync 测试守护。
-- **v5.9.0** —— 编码/国际化测试覆盖:新增回归测试,证明工具能在路径含空格或非 ASCII(中日韩)字符的仓库上整合与读取 —— 二者在 cp936/GBK 的 Windows 开发环境中都很常见。
-- **v5.8.0** —— 一致性打磨:`gitsync` 与 `gitstatus` 现在和 `gitmerge` 一样在运行结束时给出视觉档位升级建议(除非你固定了当前环境无法渲染的档位且未静默,否则保持沉默)。
-- **v5.7.0** —— git 安全预检:整合引擎现在会在受影响的 worktree 处于操作进行中(合并/变基/拣选/回退)时提前拒绝,并指明具体操作,而非笼统报告"有未提交改动"。标记经 `git rev-parse --git-path` 按 worktree 解析,对链接 worktree 同样正确。
-- **v5.6.0** —— git 安全加固:经统一 `Invoke-GitCommand` 的每次 git 调用现都运行于非交互、长路径安全的配置下 —— `GIT_TERMINAL_PROMPT=0`(凭据提示时快速失败而非挂起)、`GIT_EDITOR=true`(绝不弹出编辑器)、`-c core.longpaths=true`(Windows 长路径安全)、`-c rerere.enabled=false`(已记录的冲突解决绝不会悄悄自动解决我们的一次性集成合并)。两个环境变量捕获后恢复,无全局副作用。
-- **v5.5.0** —— 仓库整理:入口命令(`gitmerge`/`gitsync`/`gitstatus`)留在顶层,所有 `GitMergeTools.*.psm1` 模块移入 `Modules/` 子文件夹(PowerShell 约定)。加载器优先查找 `Modules/`,同时仍兼容扁平布局,既有安装不受影响。
-- **v5.4.0** —— 架构瘦身(反过度设计):**把 `max` 顶档并入 `rich` 并删除该档**(原 `max` 只是 rich 的重打标签,truecolor/OSC 效果作为镀金砍掉);`GITMERGE_VISUAL_MODE=max` 保留为 `rich` 的兼容别名。视觉档位精简为 `rich/standard/basic`。
-- **v5.3.1** —— 修复升级建议:当环境已达最优(`max` + PowerShell 7)时**不再弹出任何升级建议**;建议仅在**显式固定的档位未达成**时出现,且指出**具体缺失的能力项**(原先以 `rich` 为基准,在更高的 `max` 档下误报为"未启用 rich")。
-- **v5.3.0** —— git 安全加固开篇:在统一的 `Invoke-GitCommand` 里**中和继承的 `GIT_DIR`/`GIT_WORK_TREE`/…** 定位变量(捕获后清空、用后恢复),防止泄漏的环境变量把 git 指向错误仓库、绕过路径 containment 守护。
-- **v5.2.0** —— 抽出 `Merge.psm1` 事务引擎;`gitmerge`/`gitsync` 成为同一引擎上的薄壳,**移除 `gitsync → gitmerge` 调用**。
-- **v5.1.0** —— 抽出 `Core.psm1`(git 原语唯一真源),三命令共用;为合并引擎补全特征化测试网。
-- **v5.0.0** —— 潜伏缺陷清扫:强制 UTF-8 捕获 git 输出(非 ASCII 分支名)、`gitmerge` 非破坏性 fetch、`gitsync` 遵守子分支跳过、`gitstatus` 不把 stderr 混入 porcelain、按显示宽度的横幅截断;并裁掉过度设计、清理死代码。
+**v5.x —— 模块化、引擎统一与持续加固**(已精简;逐版本细节见 Git 提交历史)
+- **v5.5.0–v5.10.0** —— 瘦身 + git 安全一波:模块移入 `Modules/` 子文件夹;非交互、长路径安全的 git 配置(`GIT_TERMINAL_PROMPT=0`、`GIT_EDITOR=true`、`core.longpaths`、关闭 `rerere`);操作进行中预检(拒绝处于 merge/rebase/cherry-pick/revert 中的 worktree);三命令统一给出升级建议;编码/国际化路径测试;`gitsync` 严格按引擎已同步集合推送。
+- **v5.4.0** —— 反过度设计:把 `max` 顶档并入 `rich` 并删除(`max` 保留为兼容别名);视觉档位精简为 `rich/standard/basic`。
+- **v5.1.0–v5.3.1** —— 模块化与加固:抽出 `Core.psm1`(git 原语)+ `Merge.psm1`(事务引擎),三命令成为同一引擎上的薄壳(**移除 `gitsync → gitmerge` 调用**);开启 git 安全加固(中和 `GIT_DIR`/定位变量);修复升级建议。
+- **v5.0.0** —— 潜伏缺陷清扫:强制 UTF-8 捕获 git 输出(非 ASCII 分支名)、非破坏性 fetch、`gitstatus` porcelain 卫生、按显示宽度截断;裁掉过度设计、清理死代码。
 
 **v4.x —— Claude 强化与开源发布**
 - **v4.3.0** —— 公开发布:双语 README(中文默认)、MIT 许可证、路线图;发布到 GitHub。

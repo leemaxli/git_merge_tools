@@ -263,6 +263,8 @@ function gitstatus {
         Write-Host ("  Result          : {0}" -f $Result) -ForegroundColor $(if ($Result -eq 'SUCCESS') { 'Green' } else { 'Red' })
         Write-Host ("  Mode            : {0}" -f $Mode)
         Write-Host ("  Repository      : {0}" -f $Repository)
+        $originUrl = Get-RemoteUrl -Repository $Repository
+        Write-Host ("  Remote (origin) : {0}" -f $(if ([string]::IsNullOrWhiteSpace($originUrl)) { '(no origin remote)' } else { $originUrl }))
         Write-Host ("  Main branch     : {0}" -f $MainBranch)
         Write-Host ("  Target branches : {0}" -f @($Snapshots).Count)
         if (@($Snapshots).Count -gt 0) {
