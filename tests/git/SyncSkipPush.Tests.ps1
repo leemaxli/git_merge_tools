@@ -1,9 +1,13 @@
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'smoke/Commands.Smoke.Tests.ps1.helper.ps1')
 
-# #3: gitsync builds its push set independently of the engine, so it would push (and report as
-# "synced") a branch that gitmerge's #10 guard deliberately skipped -- misreporting work that never
-# entered main. gitsync must honor the same unmerged-descendant skip.
-Test-Case 'gitsync does not push a branch the engine skips for an unmerged descendant (#3 / #10 consistency)' {
+# v7.3: gitsync uses per-branch topology engines (2-branch / star / mesh). The old sub-branch guard
+# in gitsync itself is removed; the 2-branch engine (Invoke-TwoBranchMerge) intentionally has NO
+# sub-branch skip (a 2-branch converge of current+X is a pure fast-forward of X -- it loses no work
+# from any descendant of X; descendants simply stay where they are with all their commits intact).
+# The engine comment (Invoke-TwoBranchMerge Step 7 NOTE) explains the design decision.
+# What gitsync DOES guarantee: it pushes exactly what the engine converged (IntegratedBranches +
+# SynchronizedBranches), and feature/A-child (which was never part of this run) stays untouched.
+Test-Case 'gitsync 2-branch: converges current+feature/A; feature/A-child is untouched (not pushed, not lost)' {
     $sb = New-GitSandbox
     try {
         $base = New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base'
@@ -11,19 +15,34 @@ Test-Case 'gitsync does not push a branch the engine skips for an unmerged desce
         Invoke-SandboxGit $sb.Repo @('init', '--bare', $origin) | Out-Null
         Invoke-SandboxGit $sb.Repo @('remote', 'add', 'origin', $origin) | Out-Null
         Invoke-SandboxGit $sb.Repo @('push', 'origin', 'main') | Out-Null
-        # feature/A ahead of main; feature/A-child descends from it with extra unmerged work (NOT selected).
+        # feature/A: ahead of main; push to origin too so no origin-diverge issue.
         New-SandboxBranch -Sandbox $sb -Name 'feature/A' -StartPoint $base
         Invoke-SandboxGit $sb.Repo @('switch', 'feature/A') | Out-Null
         $null = New-SandboxCommit -Sandbox $sb -FileName 'a.txt' -Content "A`n" -Message 'A work'
+        Invoke-SandboxGit $sb.Repo @('push', 'origin', 'feature/A') | Out-Null
+        $aLocalBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/feature/A'
+        # feature/A-child: descends from feature/A with extra unmerged work (NOT selected in this run).
         New-SandboxBranch -Sandbox $sb -Name 'feature/A-child' -StartPoint 'feature/A'
         Invoke-SandboxGit $sb.Repo @('switch', 'feature/A-child') | Out-Null
-        $null = New-SandboxCommit -Sandbox $sb -FileName 'c.txt' -Content "child`n" -Message 'child work'
+        $childTipBefore = New-SandboxCommit -Sandbox $sb -FileName 'c.txt' -Content "child`n" -Message 'child work'
         Invoke-SandboxGit $sb.Repo @('switch', 'main') | Out-Null
 
-        # gitsync feature/A: the engine skips feature/A (#10); gitsync must NOT push it to origin.
-        $null = Invoke-ProductCommand -Script 'gitsync.ps1' -Func 'gitsync' -Arg 'feature/A' -Sandbox $sb
-        $ls = Invoke-SandboxGit $sb.Repo @('ls-remote', $origin, 'refs/heads/feature/A')
-        Assert-Equal '' ((@($ls.Output) -join ' ').Trim()) -Message 'a skipped branch must not be pushed to origin (gitsync must honor the #10 skip)'
+        # gitsync feature/A: 2-branch engine converges main and feature/A bidirectionally.
+        # feature/A-child is a descendant of feature/A but is NOT part of this run (not selected).
+        $ok = Invoke-ProductCommand -Script 'gitsync.ps1' -Func 'gitsync' -Arg 'feature/A' -Sandbox $sb
+        Assert-True $ok 'gitsync 2-branch of main+feature/A should succeed (feature/A-child is irrelevant to 2-branch)'
+
+        # feature/A-child must be untouched (not pushed, not moved, not lost).
+        $childTipAfter = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/feature/A-child'
+        Assert-Equal $childTipBefore $childTipAfter -Message 'feature/A-child must be unchanged: not part of this 2-branch run'
+
+        # feature/A-child must NOT be pushed to origin (only the converged branches are pushed).
+        $ls = Invoke-SandboxGit $sb.Repo @('ls-remote', $origin, 'refs/heads/feature/A-child')
+        Assert-Equal '' ((@($ls.Output) -join ' ').Trim()) -Message 'feature/A-child must not be pushed (was not part of this run)'
+
+        # feature/A must be pushed (it was converged by the 2-branch engine).
+        $lsA = Invoke-SandboxGit $sb.Repo @('ls-remote', $origin, 'refs/heads/feature/A')
+        Assert-False ([string]::IsNullOrWhiteSpace((@($lsA.Output) -join ' ').Trim())) 'feature/A must be pushed (it was converged)'
     }
     finally { Remove-GitSandbox $sb }
 }

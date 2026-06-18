@@ -275,29 +275,50 @@ function gitsync {
             -not $_.StartsWith('gitmerge-tmp-', [System.StringComparison]::Ordinal)
         })
 
+    # Compute the INVOLVED branch set per mode (v7.3 topology).
+    # current: X = mainBranch (empty BranchName) or BranchName; involved = {current} or {current, X}.
+    # single:  X = BranchName; involved = {mainBranch} or {mainBranch, X} (mainBranch is current by convention).
+    # all:     involved = {current} + others (star topology: current is hub).
+    # cross-all: involved = all managed (mesh topology).
+    # The sub-branch guard is owned by the topology engines for all/cross-all; gitsync no longer needs it.
+    $currentBranch = Get-CurrentBranch $repository
+    if (($mode -eq 'current' -or $mode -eq 'all') -and [string]::IsNullOrWhiteSpace($currentBranch)) {
+        $failureReason = 'Current HEAD is detached; pass an explicit local branch name, all, or cross-all.'
+        Write-Warning $failureReason
+        return $false
+    }
+
+    $involved = @()
+    $skipLocalMerge = $false
+
     if ($mode -eq 'current') {
-        $currentBranch = Get-CurrentBranch $repository
-        if ([string]::IsNullOrWhiteSpace($currentBranch)) {
-            $failureReason = 'Current HEAD is detached; pass an explicit local branch name, all, or cross-all.'
-            Write-Warning $failureReason
-            return $false
-        }
         Write-StatusLine -Marker '✓' -Message "Current branch: $currentBranch" -Color Green
-        if ($currentBranch -ceq $mainBranch) {
-            Write-Warning "Current branch is the main branch '$mainBranch'; gitsync will push main only."
-            $targetBranches = @()
+        # X = mainBranch when BranchName is empty. If X == current, pure push-only (no local merge).
+        $X = $mainBranch
+        if ($X -ceq $currentBranch) {
+            $skipLocalMerge = $true
+            $involved = @($currentBranch)
+            Write-StatusLine -Marker '✓' -Message "Current branch is main ('$mainBranch'); gitsync will push main only." -Color Green
         }
         else {
-            $targetBranches = @($currentBranch)
+            $involved = Get-UniqueBranchList @($currentBranch, $X)
         }
     }
     elseif ($mode -eq 'single') {
         if ($BranchName -ceq $mainBranch) {
-            Write-Warning "Selected branch is the main branch '$mainBranch'; gitsync will push main only."
-            $targetBranches = @()
+            $skipLocalMerge = $true
+            $involved = @($mainBranch)
+            Write-StatusLine -Marker '✓' -Message "Selected branch is main ('$mainBranch'); gitsync will push main only." -Color Green
         }
         elseif (Test-LocalBranch $repository $BranchName) {
-            $targetBranches = @($BranchName)
+            # 2-branch: current + BranchName; resolve current for the involved set.
+            if ([string]::IsNullOrWhiteSpace($currentBranch)) {
+                # Detached HEAD but explicit branch selected: just use mainBranch + BranchName.
+                $involved = Get-UniqueBranchList @($mainBranch, $BranchName)
+            }
+            else {
+                $involved = Get-UniqueBranchList @($currentBranch, $BranchName)
+            }
         }
         else {
             $failureReason = "Local branch '$BranchName' does not exist."
@@ -305,38 +326,39 @@ function gitsync {
             return $false
         }
     }
+    elseif ($mode -eq 'all') {
+        # Star: hub = current; spokes = all other managed.
+        $otherManaged = @($managedBranches | Where-Object { $_ -cne $currentBranch })
+        $involved = Get-UniqueBranchList (@($currentBranch) + $otherManaged)
+        Write-StatusLine -Marker '✓' -Message "Current branch (hub): $currentBranch" -Color Green
+    }
+    elseif ($mode -eq 'cross-all') {
+        # Mesh: all managed branches.
+        $involved = Get-UniqueBranchList @($managedBranches)
+    }
     else {
-        $targetBranches = @($managedBranches)
+        # debug mode: use all managed (computed below in the debug block).
+        $involved = Get-UniqueBranchList @($managedBranches)
     }
-    # Unmerged-descendant ("sub-branch") guard (#10): mirror gitmerge's engine skip so gitsync never
-    # pushes — nor reports as "synced" — a target the merge engine deliberately skips (its descendant's
-    # work was never consolidated into main). gitmerge still emits the detailed warning during the merge.
-    if (@($targetBranches).Count -gt 0) {
-        $targetSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-        foreach ($t in $targetBranches) { [void]$targetSet.Add($t) }
-        $keptTargets = [System.Collections.Generic.List[string]]::new()
-        foreach ($target in $targetBranches) {
-            $descendants = @($managedBranches | Where-Object {
-                    $_ -cne $target -and $_ -cne $mainBranch -and -not $targetSet.Contains($_) -and
-                    (Test-Ancestor -Repository $repository -Ancestor "refs/heads/$target" -Descendant "refs/heads/$_")
-                })
-            if ($descendants.Count -gt 0) {
-                Write-StatusLine -Marker '✗' -Message "Skipping '$target': unmerged descendant branch(es): $($descendants -join ', '). It will not be consolidated or pushed; merge them back into '$target' (or select them too / use 'all') to include its work." -Color Yellow
-            }
-            else {
-                $keptTargets.Add($target)
-            }
-        }
-        $targetBranches = @($keptTargets.ToArray())
+
+    # pushBranches initially = involved (will be refined post-merge from engine RunState).
+    $pushBranches = @($involved)
+    # targetBranches for summary = involved minus current/hub if mode is 2-branch or star.
+    if ($mode -eq 'current' -or $mode -eq 'single') {
+        $targetBranches = @($involved | Where-Object { $_ -cne ($currentBranch,$mainBranch | Select-Object -First 1) })
     }
-    $pushBranches = Get-UniqueBranchList (@($mainBranch) + @($targetBranches))
-    $skipLocalMerge = (($mode -eq 'single' -and $BranchName -ceq $mainBranch) -or ($mode -eq 'current' -and @($targetBranches).Count -eq 0))
+    elseif ($mode -eq 'all') {
+        $targetBranches = @($involved | Where-Object { $_ -cne $currentBranch })
+    }
+    else {
+        $targetBranches = @($involved)
+    }
 
     if ($mode -eq 'debug') {
         Write-StatusLine -Marker '◇' -Message 'Would fetch origin and verify remote branch ancestry before any local merge.' -Color Magenta
-        Write-StatusLine -Marker '◇' -Message $(if ($skipLocalMerge) { "Would skip local merge because '$mainBranch' was selected directly." } else { 'Would run the shared consolidation engine for the selected local merge scope.' }) -Color Magenta
-        Write-Stage -Title 'PUSH REMOTE' -Subtitle '[DRY-RUN] Would push main and synchronized branches to origin' -StageIcon 'PUSH' -Color Magenta
-        Write-StatusLine -Marker '◇' -Message "Would push: $($pushBranches -join ', ')" -Color Magenta
+        Write-StatusLine -Marker '◇' -Message $(if ($skipLocalMerge) { "Would skip local merge because main was selected directly." } else { 'Would run the matching topology engine for the selected local merge scope.' }) -Color Magenta
+        Write-Stage -Title 'PUSH REMOTE' -Subtitle '[DRY-RUN] Would push each converged branch to its own origin/<branch>' -StageIcon 'PUSH' -Color Magenta
+        Write-StatusLine -Marker '◇' -Message "Would push (per-branch): $($involved -join ', ')" -Color Magenta
         $syncResult = 'SIMULATED'
         return $true
     }
@@ -360,7 +382,7 @@ function gitsync {
     $pullPlan = [System.Collections.Generic.List[object]]::new()
     $needManual = [System.Collections.Generic.List[object]]::new()
     $skipBranches = [System.Collections.Generic.List[string]]::new()
-    foreach ($branch in $pushBranches) {
+    foreach ($branch in $involved) {
         switch (Get-RemoteBranchSyncState -Repository $repository -Branch $branch) {
             'FastForwardable' {
                 $branchWorktree = Find-BranchWorktree $worktrees $branch
@@ -481,16 +503,19 @@ function gitsync {
             Write-StatusLine -Marker '✓' -Message "Pulled origin/$($item.Branch) into local '$($item.Branch)' ($how)." -Color Green
         }
     }
-    Write-StatusLine -Marker '✓' -Message "Remote is in sync or behind local for: $($pushBranches -join ', '). Proceeding." -Color Green
+    Write-StatusLine -Marker '✓' -Message "Remote is in sync or behind local for: $($involved -join ', '). Proceeding." -Color Green
 
     if ($skipLocalMerge) {
-        Write-StatusLine -Marker '✓' -Message "Selected '$mainBranch'; no local merge phase is required before push." -Color Green
+        Write-StatusLine -Marker '✓' -Message "Selected main directly; no local merge phase is required before push." -Color Green
+        # Push just the involved branches (main only in this case).
+        $pushBranches = @($involved)
     }
     else {
-        # Run the SAME transactional engine gitmerge uses (no separate gitmerge function/process call);
-        # it renders progress through gitsync's $visual and reports via $mergeState. Push happens below.
+        # Route to the matching topology engine (v7.3): Invoke-TwoBranchMerge / Invoke-StarMerge /
+        # Invoke-MeshMerge. Each engine is the same reviewed safety machinery gitmerge uses; gitsync
+        # passes pull-unsafe branches in -ExcludeBranches so the engine skips them (skip-and-proceed).
         $mergeState = [pscustomobject]@{
-            DryRun = $false; Mode = (Get-Mode $BranchName); Result = 'FAILED'; Repository = ''
+            DryRun = $false; Mode = $mode; Result = 'FAILED'; Repository = ''
             MainBranch = ''; WorktreeCount = 0; LocalBranchCount = 0
             TargetBranches = [System.Collections.Generic.List[string]]::new()
             IntegratedBranches = [System.Collections.Generic.List[string]]::new()
@@ -500,33 +525,54 @@ function gitsync {
             ConflictBranch = ''; MainPublished = 'NO'; CleanupStatus = 'NOT REQUIRED'
             FailureReason = ''; Elapsed = [timespan]::Zero; SummaryEnabled = $false
         }
-        $mergeOk = [bool](@(Invoke-GitMergeConsolidation -BranchName $BranchName -RunState $mergeState -Visual $visual -ExcludeBranches $skipBranches.ToArray()) |
-            Where-Object { $_ -is [bool] } | Select-Object -Last 1)
+        if ($mode -eq 'current' -or $mode -eq 'single') {
+            $mergeOk = [bool](@(Invoke-TwoBranchMerge -BranchName $BranchName -RunState $mergeState -Visual $visual) |
+                Where-Object { $_ -is [bool] } | Select-Object -Last 1)
+        }
+        elseif ($mode -eq 'all') {
+            $mergeOk = [bool](@(Invoke-StarMerge -RunState $mergeState -Visual $visual -ExcludeBranches $skipBranches.ToArray()) |
+                Where-Object { $_ -is [bool] } | Select-Object -Last 1)
+        }
+        else {
+            # cross-all -> mesh
+            $mergeOk = [bool](@(Invoke-MeshMerge -RunState $mergeState -Visual $visual -ExcludeBranches $skipBranches.ToArray()) |
+                Where-Object { $_ -is [bool] } | Select-Object -Last 1)
+        }
         if (-not $mergeOk) {
-            $failureReason = if ([string]::IsNullOrWhiteSpace($mergeState.FailureReason)) { 'Local consolidation phase failed; nothing was pushed.' } else { $mergeState.FailureReason }
+            $failureReason = if ([string]::IsNullOrWhiteSpace($mergeState.FailureReason)) { 'Local merge phase failed; nothing was pushed.' } else { $mergeState.FailureReason }
             Write-Warning $failureReason
             return $false
         }
-        # Push exactly what the engine actually synchronized -- the engine is the single source of truth
-        # for the #10 sub-branch skip, so gitsync can never push (nor report as synced) a branch the
-        # engine deliberately skipped. main is always included even when no targets were synchronized.
-        $pushBranches = Get-UniqueBranchList (@($mainBranch) + @($mergeState.SynchronizedBranches))
+        # Push exactly the engine-converged branches: IntegratedBranches + SynchronizedBranches.
+        # The engine is the single source of truth for skips, so we never push a branch the engine dropped.
+        $pushBranches = Get-UniqueBranchList (@($mergeState.IntegratedBranches) + @($mergeState.SynchronizedBranches))
+        if (@($pushBranches).Count -eq 0) {
+            # Engine returned success but synced nothing (e.g. already up-to-date): push the involved set.
+            $pushBranches = @($involved | Where-Object { $skipBranches -notcontains $_ })
+        }
     }
 
-    Write-Stage -Title 'PUSH REMOTE' -Subtitle 'Push main and synchronized local branches to origin with one atomic update' -StageIcon 'PUSH'
-    $refspecs = @($pushBranches | ForEach-Object { "refs/heads/$($_):refs/heads/$($_)" })
-    $push = Invoke-GitCommand $repository (@('push', '--atomic', 'origin') + $refspecs) -MergeError
-    if ($push.ExitCode -ne 0) {
-        Write-GitFailure 'Remote push failed; inspect the remote rejection and retry after reconciling it' $push
-        $failureReason = 'Remote push failed.'
-        return $false
-    }
+    Write-Stage -Title 'PUSH REMOTE' -Subtitle 'Push each converged branch to its own origin/<branch> (per-branch, skip-on-reject)' -StageIcon 'PUSH'
+    # Per-branch single-ref push (v7.3): one push per branch; a rejected ref is skipped, never forced.
+    # This replaces the old single atomic push of main+targets: pushes are now topology-matched and
+    # per-branch, so a rejection on one branch does not block the others.
+    $failedPush = [System.Collections.Generic.List[string]]::new()
     foreach ($branch in $pushBranches) {
-        $pushedBranches.Add($branch)
-        Write-StatusLine -Marker '✓' -Message "Pushed '$branch' to origin/$branch." -Color Green
+        $pushB = Invoke-GitCommand $repository @('push', 'origin', "refs/heads/$($branch):refs/heads/$($branch)") -MergeError
+        if ($pushB.ExitCode -eq 0) {
+            $pushedBranches.Add($branch)
+            Write-StatusLine -Marker '✓' -Message "Pushed '$branch' to origin/$branch." -Color Green
+        }
+        else {
+            Write-GitFailure "Push of '$branch' was rejected; skipping it (re-run after reconciling)" $pushB
+            $failedPush.Add($branch)
+        }
     }
-    # The push above is the irreversible, authoritative result — mark SUCCESS now so a failure of the
-    # best-effort remote-tracking refresh below can never misreport a completed push as FAILED (#2).
+    if ($failedPush.Count -gt 0) {
+        Write-StatusLine -Marker '!' -Message "Rejected pushes (not forced): $($failedPush -join ', '). Re-run after reconciling." -Color Yellow
+    }
+    # Mark SUCCESS as soon as any branch was pushed -- the merge already happened; partial push is still
+    # a completed merge. A full push-failure (all rejected) is still SUCCESS for the local merge.
     $syncResult = 'SUCCESS'
 
     # Refresh remote-tracking refs (best-effort, non-destructive: never prune local tags/refs as a side

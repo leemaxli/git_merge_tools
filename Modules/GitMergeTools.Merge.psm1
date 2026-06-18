@@ -1079,12 +1079,15 @@ function Invoke-StarMerge {
     # Safety: all real-ref moves are FF (merge --ff-only) or Move-BranchRefSafely CAS or
     # commit-tree-derived CAS. Hub union built/validated in throwaway before any real ref moves.
     # Conflicts skip (merge --abort, no partial state). finally-cleanup always runs.
+    # -ExcludeBranches: caller-supplied names to drop from the spoke set before any processing
+    # (gitsync passes origin-pull-unsafe branches here; skip-and-proceed, added to SkippedBranches).
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Interactive, colorized engine output.')]
     [CmdletBinding()]
     [OutputType([bool])]
     param(
         [Parameter(Mandatory)]$RunState,
-        $Visual
+        $Visual,
+        [string[]]$ExcludeBranches = @()
     )
 
     function Write-Stage {
@@ -1158,6 +1161,22 @@ function Invoke-StarMerge {
     $managed = @($allLocal | Where-Object { $_ -notmatch '^gitmerge-tmp-' })
     $others = @($managed | Where-Object { $_ -ne $T })
     $RunState.LocalBranchCount = $managed.Count
+
+    # Caller-supplied exclusions (gitsync passes origin-pull-unsafe spokes here): drop them before
+    # any processing and record them as skipped (skip-and-proceed, consistent with the rest of the engine).
+    if (@($ExcludeBranches).Count -gt 0 -and @($others).Count -gt 0) {
+        $excludeSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        foreach ($ex in $ExcludeBranches) { [void]$excludeSet.Add($ex) }
+        $keptOthers = [System.Collections.Generic.List[string]]::new()
+        foreach ($o in $others) {
+            if ($excludeSet.Contains($o)) {
+                if (-not $RunState.SkippedBranches.Contains($o)) { [void]$RunState.SkippedBranches.Add($o) }
+                Write-StatusLine -Marker '!' -Message "Spoke '$o' excluded (origin pull unsafe; skipping)." -Color Yellow
+            }
+            else { [void]$keptOthers.Add($o) }
+        }
+        $others = @($keptOthers.ToArray())
+    }
 
     if ($others.Count -eq 0) {
         Write-StatusLine -Marker 'i' -Message "No other branches; nothing to merge." -Color DarkGray
@@ -1470,13 +1489,16 @@ function Invoke-MeshMerge {
     # Safety: all real-ref moves are FF (merge --ff-only) or Move-BranchRefSafely CAS.
     # Conflicts: merge --abort in throwaway, change NOTHING, return $false immediately.
     # finally: always cleans up the throwaway.
+    # -ExcludeBranches: caller-supplied names to drop from the participant set before any processing
+    # (gitsync passes origin-pull-unsafe branches here; skip-and-proceed, added to SkippedBranches).
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Interactive, colorized engine output.')]
     [CmdletBinding()]
     [OutputType([bool])]
     param(
         [Parameter(Mandatory)]$RunState,
         $Visual,
-        [switch]$DryRun
+        [switch]$DryRun,
+        [string[]]$ExcludeBranches = @()
     )
 
     function Write-Stage {
@@ -1560,6 +1582,23 @@ function Invoke-MeshMerge {
     # Deterministic order: current first, then the rest sorted.
     $others = @($managed | Where-Object { $_ -ne $current } | Sort-Object)
     $ordered = @($current) + $others
+
+    # Caller-supplied exclusions (gitsync passes origin-pull-unsafe branches here): drop them from the
+    # participant set before any processing and record them as skipped (skip-and-proceed).
+    if (@($ExcludeBranches).Count -gt 0 -and @($ordered).Count -gt 0) {
+        $excludeSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        foreach ($ex in $ExcludeBranches) { [void]$excludeSet.Add($ex) }
+        $keptOrdered = [System.Collections.Generic.List[string]]::new()
+        foreach ($o in $ordered) {
+            if ($excludeSet.Contains($o)) {
+                if (-not $RunState.SkippedBranches.Contains($o)) { [void]$RunState.SkippedBranches.Add($o) }
+                Write-StatusLine -Marker '!' -Message "Branch '$o' excluded (origin pull unsafe; skipping)." -Color Yellow
+            }
+            else { [void]$keptOrdered.Add($o) }
+        }
+        $ordered = @($keptOrdered.ToArray())
+    }
+
     foreach ($b in $ordered) { [void]$RunState.TargetBranches.Add($b) }
     Write-StatusLine -Marker 'i' -Message "Managed ($($managed.Count)): $($ordered -join ', ')" -Color Green
 

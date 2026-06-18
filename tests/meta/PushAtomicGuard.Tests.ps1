@@ -1,22 +1,30 @@
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)   # tests/meta -> repo root
 
-# HARD CONSTRAINT (remote side): gitsync's ONLY remote write is a single `git push --atomic`, so a
-# multi-ref push lands all-or-nothing -- a partial push could clobber a collaborator's branch. That one
-# token is the entire remote-side guarantee, so this meta-test pins it: every push in gitsync must be
-# atomic, and gitmerge/gitstatus must never push at all. (The positive twin of PushForceGuard's --force ban.)
-Test-Case 'gitsync push is --atomic; gitmerge/gitstatus never push' {
-    # Match the lowercase git argument 'push' case-SENSITIVELY (-cmatch) so the uppercase 'PUSH' stage-icon
-    # string is not mistaken for a git push.
-    $sawAtomicPush = $false
+# HARD CONSTRAINT (remote side): gitsync's remote writes are per-branch single-ref pushes (v7.3).
+# Each push carries exactly one refspec; no multi-ref push means no --atomic is needed (and it
+# would be wrong to require it on a single-ref push). The safety guarantee is now: each branch is
+# pushed individually, and a rejection skips that branch (skip-on-reject, never forced).
+# This meta-test pins the per-branch reality: every push in gitsync is a single-ref ordinary push
+# (no --atomic, no --force, no + prefix); gitmerge/gitstatus must never push at all.
+Test-Case 'gitsync uses per-branch single-ref push; gitmerge/gitstatus never push' {
+    # Match the lowercase git argument 'push' case-SENSITIVELY (-cmatch) so the uppercase 'PUSH'
+    # stage-icon string is not mistaken for a git push command.
+    $sawPush = $false
     $lineNo = 0
     foreach ($line in (Get-Content -LiteralPath (Join-Path $repoRoot 'gitsync.ps1'))) {
         $lineNo++
         if ($line -cmatch "'push'") {
-            Assert-Match '--atomic' $line -Message "every gitsync push must be --atomic (gitsync.ps1:$lineNo): $line"
-            $sawAtomicPush = $true
+            # Every push must be a single-ref push (exactly one refspec of the form refs/heads/B:refs/heads/B).
+            # Multi-ref pushes are forbidden (they would require --atomic; per-branch design avoids them).
+            Assert-False ([bool]($line -cmatch '--atomic')) "gitsync must not use --atomic (per-branch single-ref push design) (gitsync.ps1:$lineNo): $line"
+            # Pushes must never be forced.
+            Assert-False ([bool]($line -cmatch '--force')) "gitsync push must never carry --force (gitsync.ps1:$lineNo): $line"
+            Assert-False ([bool]($line -cmatch 'force-with-lease')) "gitsync push must never carry --force-with-lease (gitsync.ps1:$lineNo): $line"
+            Assert-False ([bool]($line -match '\+refs/')) "gitsync push refspec must never use + (force prefix) (gitsync.ps1:$lineNo): $line"
+            $sawPush = $true
         }
     }
-    Assert-True $sawAtomicPush 'gitsync must contain its atomic push (its only remote write)'
+    Assert-True $sawPush 'gitsync must contain its per-branch push (its only remote write)'
 
     foreach ($script in 'gitmerge.ps1', 'gitstatus.ps1') {
         $text = Get-Content -LiteralPath (Join-Path $repoRoot $script) -Raw
