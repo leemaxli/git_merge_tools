@@ -39,13 +39,49 @@ Test-Case 'gitsync Stage 4: auto-merges a not-checked-out diverged branch when t
     } finally { Remove-GitSandbox $ctx.Sandbox }
 }
 
-Test-Case 'gitsync Stage 4: a not-checked-out diverged branch with CONFLICTS still prompts; nothing changed' {
+Test-Case 'gitsync all SKIPS a not-checked-out diverged branch with conflicts and proceeds; that branch unchanged' {
+    # skip-and-proceed (v6.7.0): a conflicting non-main target is never auto-merged, but with all/cross-all
+    # it is SKIPPED (not a whole-run abort) so the rest still sync.
     $ctx = New-NotCheckedOutDivergedSandbox -Conflict
     try {
         $out = Invoke-ProductCommandText -Script 'gitsync.ps1' -Func 'gitsync' -Arg 'all' -Sandbox $ctx.Sandbox
-        Assert-Match 'ACTION NEEDED' $out -Message 'a conflicting divergence must never be auto-merged'
-        Assert-Equal $ctx.LocalTip (Get-SandboxRef -Sandbox $ctx.Sandbox -Ref 'refs/heads/feature/x') -Message 'feature/x must be unchanged on a conflicting divergence'
+        Assert-Match 'Skipping' $out -Message 'the conflicting branch must be skipped (not abort the whole run)'
+        Assert-False ([bool]($out -match 'ACTION NEEDED')) 'all-mode must skip-and-proceed, not stop with ACTION NEEDED for a non-main conflict'
+        Assert-Equal $ctx.LocalTip (Get-SandboxRef -Sandbox $ctx.Sandbox -Ref 'refs/heads/feature/x') -Message 'the conflicting branch must be untouched (skipped)'
     } finally { Remove-GitSandbox $ctx.Sandbox }
+}
+
+Test-Case 'gitsync all skips a conflicting non-main branch but still syncs a safe sibling' {
+    $sb = New-GitSandbox
+    try {
+        $c1 = New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base'
+        $origin = Join-Path $sb.Root 'origin.git'
+        Invoke-SandboxGit $sb.Repo @('init', '--bare', $origin) | Out-Null
+        Invoke-SandboxGit $sb.Repo @('remote', 'add', 'origin', $origin) | Out-Null
+        Invoke-SandboxGit $sb.Repo @('push', 'origin', 'main') | Out-Null
+        # feature/safe: origin ahead (FF), not checked out -> should auto-pull + sync.
+        New-SandboxBranch -Sandbox $sb -Name 'feature/safe' -StartPoint $c1
+        Invoke-SandboxGit $sb.Repo @('switch', 'feature/safe') | Out-Null
+        $safeTip = New-SandboxCommit -Sandbox $sb -FileName 'safe.txt' -Content "safe`n" -Message 'safe work'
+        Invoke-SandboxGit $sb.Repo @('push', 'origin', 'feature/safe') | Out-Null
+        Invoke-SandboxGit $sb.Repo @('reset', '--hard', $c1) | Out-Null
+        # feature/bad: diverged with conflict, not checked out -> should be skipped.
+        New-SandboxBranch -Sandbox $sb -Name 'feature/bad' -StartPoint $c1
+        Invoke-SandboxGit $sb.Repo @('switch', 'feature/bad') | Out-Null
+        $badOrigin = New-SandboxCommit -Sandbox $sb -FileName 'shared.txt' -Content "origin side`n" -Message 'bad origin'
+        Invoke-SandboxGit $sb.Repo @('push', 'origin', 'feature/bad') | Out-Null
+        Invoke-SandboxGit $sb.Repo @('reset', '--hard', $c1) | Out-Null
+        $badLocal = New-SandboxCommit -Sandbox $sb -FileName 'shared.txt' -Content "local side`n" -Message 'bad local'
+        Invoke-SandboxGit $sb.Repo @('switch', 'main') | Out-Null
+
+        $ok = Invoke-ProductCommand -Script 'gitsync.ps1' -Func 'gitsync' -Arg 'all' -Sandbox $sb
+        Assert-True $ok 'gitsync all should skip the conflicting branch and still complete'
+        $anc = Invoke-SandboxGit $sb.Repo @('merge-base', '--is-ancestor', $safeTip, 'refs/heads/feature/safe')
+        Assert-Equal 0 $anc.ExitCode -Message 'the safe sibling must be pulled + synced'
+        Assert-Equal $badLocal (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/feature/bad') -Message 'the conflicting branch must be untouched (skipped)'
+        $ls = Invoke-SandboxGit $sb.Repo @('ls-remote', $origin, 'refs/heads/feature/bad')
+        Assert-Match ([regex]::Escape($badOrigin)) ((@($ls.Output) -join ' ')) -Message 'origin/feature/bad must be unchanged (not force-pushed)'
+    } finally { Remove-GitSandbox $sb }
 }
 
 function New-CheckedOutDivergedSandbox {

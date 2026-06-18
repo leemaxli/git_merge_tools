@@ -348,7 +348,8 @@ function gitsync {
     #            Diverged                                         -> prompt (Stage 4 handles no-conflict)
     $worktrees = @(Get-WorktreeRecord $repository)
     $pullPlan = [System.Collections.Generic.List[object]]::new()
-    $needManual = [System.Collections.Generic.List[string]]::new()
+    $needManual = [System.Collections.Generic.List[object]]::new()
+    $skipBranches = [System.Collections.Generic.List[string]]::new()
     foreach ($branch in $pushBranches) {
         switch (Get-RemoteBranchSyncState -Repository $repository -Branch $branch) {
             'FastForwardable' {
@@ -366,13 +367,13 @@ function gitsync {
                     $pullPlan.Add([pscustomobject]@{ Branch = $branch; Method = 'worktree'; Worktree = $branchWorktree })
                 }
                 else {
-                    $needManual.Add("origin/$branch is ahead of local '$branch', but its worktree ($($branchWorktree.Path)) is not clean (see above). Make it clean, then retry  (or:  git pull --ff-only origin $branch).")
+                    $needManual.Add([pscustomobject]@{ Branch = $branch; Message = "origin/$branch is ahead of local '$branch', but its worktree ($($branchWorktree.Path)) is not clean (see above). Make it clean, then retry  (or:  git pull --ff-only origin $branch)." })
                 }
             }
             'Diverged' {
                 $mergeTree = Get-RemoteMergeTree -Repository $repository -Branch $branch
                 if ($null -eq $mergeTree) {
-                    $needManual.Add("origin/$branch and local '$branch' have diverged with conflicts. Reconcile manually (review/merge), then retry.")
+                    $needManual.Add([pscustomobject]@{ Branch = $branch; Message = "origin/$branch and local '$branch' have diverged with conflicts. Reconcile manually (review/merge), then retry." })
                 }
                 else {
                     $branchWorktree = Find-BranchWorktree $worktrees $branch
@@ -391,18 +392,29 @@ function gitsync {
                         $pullPlan.Add([pscustomobject]@{ Branch = $branch; Method = 'merge-worktree'; Worktree = $branchWorktree; Tree = $mergeTree })
                     }
                     else {
-                        $needManual.Add("origin/$branch and local '$branch' have diverged, but its worktree ($($branchWorktree.Path)) is not clean (see above). Make it clean, then retry.")
+                        $needManual.Add([pscustomobject]@{ Branch = $branch; Message = "origin/$branch and local '$branch' have diverged, but its worktree ($($branchWorktree.Path)) is not clean (see above). Make it clean, then retry." })
                     }
                 }
             }
         }
     }
     if ($needManual.Count -gt 0) {
-        Write-Stage -Title 'ACTION NEEDED' -Subtitle 'origin has updates that cannot be safely auto-pulled yet; nothing was changed' -StageIcon 'REMOTE' -Color Yellow
-        foreach ($message in $needManual) { Write-StatusLine -Marker '!' -Message $message -Color Yellow }
-        Write-StatusLine -Marker 'i' -Message 'Nothing was changed. Wider automatic pulling arrives in later v6.x sub-versions.' -Color DarkGray
-        $syncResult = 'ACTION NEEDED'
-        return $false
+        $mainUnsafe = @($needManual | Where-Object { $_.Branch -ceq $mainBranch })
+        # MAIN unsafe, or a single explicitly-selected branch is unsafe -> ABORT, change nothing. (With
+        # all/cross-all there are other branches to proceed with, so non-main targets are skipped instead.)
+        if ($mainUnsafe.Count -gt 0 -or $mode -ne 'all') {
+            Write-Stage -Title 'ACTION NEEDED' -Subtitle 'origin has updates that cannot be safely auto-pulled; nothing was changed' -StageIcon 'REMOTE' -Color Yellow
+            foreach ($entry in $needManual) { Write-StatusLine -Marker '!' -Message $entry.Message -Color Yellow }
+            Write-StatusLine -Marker 'i' -Message 'Nothing was changed. Resolve the above, then re-run gitsync.' -Color DarkGray
+            $syncResult = 'ACTION NEEDED'
+            return $false
+        }
+        # all/cross-all + only non-main targets unsafe -> SKIP them (exclude from pull, consolidation, and
+        # push) and proceed with the rest (skip-and-proceed). Each skipped branch is left untouched.
+        foreach ($entry in $needManual) {
+            Write-StatusLine -Marker '✗' -Message "Skipping '$($entry.Branch)': $($entry.Message)" -Color Yellow
+            [void]$skipBranches.Add($entry.Branch)
+        }
     }
     if ($pullPlan.Count -gt 0) {
         Write-Stage -Title 'REMOTE PULL' -Subtitle 'Fast-forward local branches from origin (safe: not checked out, or checked out and clean)' -StageIcon 'REMOTE'
@@ -478,7 +490,7 @@ function gitsync {
             ConflictBranch = ''; MainPublished = 'NO'; CleanupStatus = 'NOT REQUIRED'
             FailureReason = ''; Elapsed = [timespan]::Zero; SummaryEnabled = $false
         }
-        $mergeOk = [bool](@(Invoke-GitMergeConsolidation -BranchName $BranchName -RunState $mergeState -Visual $visual) |
+        $mergeOk = [bool](@(Invoke-GitMergeConsolidation -BranchName $BranchName -RunState $mergeState -Visual $visual -ExcludeBranches $skipBranches.ToArray()) |
             Where-Object { $_ -is [bool] } | Select-Object -Last 1)
         if (-not $mergeOk) {
             $failureReason = if ([string]::IsNullOrWhiteSpace($mergeState.FailureReason)) { 'Local consolidation phase failed; nothing was pushed.' } else { $mergeState.FailureReason }

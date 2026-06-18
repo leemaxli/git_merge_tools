@@ -357,7 +357,8 @@ function Invoke-GitMergeConsolidation {
     param(
         [string]$BranchName = '',
         [Parameter(Mandatory)]$RunState,
-        $Visual
+        $Visual,
+        [string[]]$ExcludeBranches = @()
     )
 
     function Write-Stage {
@@ -512,6 +513,21 @@ function Invoke-GitMergeConsolidation {
                 }
             }
             $targetBranches = @($keptTargets.ToArray())
+        }
+
+        # Caller-supplied exclusions (gitsync passes origin-pull-unsafe targets here -- e.g. a conflicting
+        # divergence it already warned about): drop them from the consolidation set (skip-and-proceed).
+        if (@($ExcludeBranches).Count -gt 0 -and @($targetBranches).Count -gt 0) {
+            $excludeSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+            foreach ($excluded in $ExcludeBranches) { [void]$excludeSet.Add($excluded) }
+            $keptAfterExclude = [System.Collections.Generic.List[string]]::new()
+            foreach ($target in $targetBranches) {
+                if ($excludeSet.Contains($target)) {
+                    if (-not $runState.SkippedBranches.Contains($target)) { $runState.SkippedBranches.Add($target) }
+                }
+                else { $keptAfterExclude.Add($target) }
+            }
+            $targetBranches = @($keptAfterExclude.ToArray())
         }
 
         $runState.LocalBranchCount = $managedBranches.Count
