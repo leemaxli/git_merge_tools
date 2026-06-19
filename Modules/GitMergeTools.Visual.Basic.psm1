@@ -90,12 +90,12 @@ function New-GitMergeToolsVisualBasic {
     }
 
     $writeSuccessBanner = {
-        param([string]$MainBranch, [int]$TargetCount, [string]$MainPublished, [string]$Name)
+        param([int]$ConvergedCount, [string]$Name)
         $commandLabel = if ([string]::IsNullOrWhiteSpace($Name)) { 'COMMAND' } else { $Name.ToUpperInvariant() }
-        if ($TargetCount -eq 0 -or $MainPublished -eq 'NOT REQUIRED') {
+        if ($ConvergedCount -eq 0) {
             Write-Host "SUCCESS: $commandLabel current; nothing to merge" -ForegroundColor $theme.Success
         } else {
-            Write-Host ("SUCCESS: {0}: {1} published; {2} branch(es) synchronized" -f $commandLabel, $MainBranch, $TargetCount) -ForegroundColor $theme.Success
+            Write-Host ("SUCCESS: {0}: {1} branch(es) converged" -f $commandLabel, $ConvergedCount) -ForegroundColor $theme.Success
         }
     }
 
@@ -105,26 +105,27 @@ function New-GitMergeToolsVisualBasic {
         param([Parameter(Mandatory)]$State, [string[]]$RecentLines, [string]$Name)
         $modeTag = if ($State.DryRun) { '[DRY-RUN]' } else { '[LIVE]' }
         $borderColor = if ($State.Result -eq 'SUCCESS') { $theme.Success } elseif ($State.Result -eq 'SIMULATED') { [ConsoleColor]::Magenta } else { $theme.Error }
-        $targetCount = @($State.TargetBranches).Count; $integratedCount = @($State.IntegratedBranches).Count; $synchronizedCount = @($State.SynchronizedBranches).Count; $failedCount = @($State.FailedBranches).Count
-        if ($State.Result -eq 'SUCCESS') { & $writeSuccessBannerForSummary -MainBranch $State.MainBranch -TargetCount $targetCount -MainPublished $State.MainPublished -Name $Name }
+        $convergedList = [System.Collections.Generic.List[string]]::new()
+        foreach ($b in @($State.IntegratedBranches)) { if (-not $convergedList.Contains($b)) { $convergedList.Add($b) } }
+        foreach ($b in @($State.SynchronizedBranches)) { if (-not $convergedList.Contains($b)) { $convergedList.Add($b) } }
+        $convergedCount = $convergedList.Count
+        $skippedCount = @($State.SkippedBranches).Count; $failedCount = @($State.FailedBranches).Count
+        if ($State.Result -eq 'SUCCESS') { & $writeSuccessBannerForSummary -ConvergedCount $convergedCount -Name $Name }
         Write-Host ''
         Write-Host "GIT MERGE SUMMARY $modeTag" -ForegroundColor $borderColor
         Write-Host ("  Result                    : {0}" -f $State.Result) -ForegroundColor $borderColor
         Write-Host ("  Mode                      : {0}" -f $State.Mode)
         Write-Host ("  Repository                : {0}" -f $State.Repository)
-        Write-Host ("  Main branch               : {0}" -f $State.MainBranch)
+        Write-Host ("  Current branch            : {0}" -f $State.MainBranch)
         Write-Host ("  Worktrees                 : {0}" -f $State.WorktreeCount)
         Write-Host ("  Local branches            : {0}" -f $State.LocalBranchCount)
-        Write-Host ("  Target branches           : {0}" -f $targetCount)
-        if ($targetCount -gt 0) { Write-Host ("    Targets                 : {0}" -f (@($State.TargetBranches) -join ', ')) }
-        Write-Host ("  Integrated into main      : {0} / {1}" -f $integratedCount, $targetCount)
-        if ($integratedCount -gt 0) { Write-Host ("    Integrated              : {0}" -f (@($State.IntegratedBranches) -join ', ')) }
-        Write-Host ("  Synchronized branches     : {0} / {1}" -f $synchronizedCount, $targetCount)
-        if ($synchronizedCount -gt 0) { Write-Host ("    Synchronized            : {0}" -f (@($State.SynchronizedBranches) -join ', ')) }
+        Write-Host ("  Converged branches        : {0}" -f $convergedCount)
+        if ($convergedCount -gt 0) { Write-Host ("    Converged               : {0}" -f ($convergedList -join ', ')) }
+        Write-Host ("  Skipped branches          : {0}" -f $skippedCount)
+        if ($skippedCount -gt 0) { Write-Host ("    Skipped                 : {0}" -f (@($State.SkippedBranches) -join ', ')) }
         Write-Host ("  Failed branches           : {0}" -f $failedCount)
         if ($failedCount -gt 0) { Write-Host ("    Failed                  : {0}" -f (@($State.FailedBranches) -join ', ')) -ForegroundColor $theme.Error }
         if (-not [string]::IsNullOrWhiteSpace($State.ConflictBranch)) { Write-Host ("  Conflict branch           : {0}" -f $State.ConflictBranch) -ForegroundColor $theme.Error }
-        Write-Host ("  Main published            : {0}" -f $State.MainPublished)
         Write-Host ("  Temporary cleanup         : {0}" -f $State.CleanupStatus)
         Write-Host ("  Elapsed                   : {0:n2}s" -f $State.Elapsed.TotalSeconds)
         if (-not [string]::IsNullOrWhiteSpace($State.FailureReason)) { Write-Host ("  Failure reason            : {0}" -f $State.FailureReason) -ForegroundColor $theme.Error }

@@ -127,18 +127,18 @@ function gitmerge {
     }
 
     function Write-SuccessBanner {
-        param([string]$MainBranch, [int]$TargetCount, [string]$MainPublished)
+        param([int]$ConvergedCount)
         if ($null -ne $visual) {
-            & $visual.WriteSuccessBanner -MainBranch $MainBranch -TargetCount $TargetCount -MainPublished $MainPublished -Name 'gitmerge'
+            & $visual.WriteSuccessBanner -ConvergedCount $ConvergedCount -Name 'gitmerge'
             return
         }
         Write-Host ''
         Write-Host '██████████████████████████████████████████████████████████████' -ForegroundColor Green
-        if ($TargetCount -eq 0 -or $MainPublished -eq 'NOT REQUIRED') {
+        if ($ConvergedCount -eq 0) {
             Write-Host '██  SUCCESS  Repository is current; nothing to merge          ██' -ForegroundColor Green
         }
         else {
-            Write-Host ("██  SUCCESS  {0} published; {1} branch(es) synchronized" -f $MainBranch, $TargetCount) -ForegroundColor Green
+            Write-Host ("██  SUCCESS  {0} branch(es) converged" -f $ConvergedCount) -ForegroundColor Green
         }
         Write-Host '██████████████████████████████████████████████████████████████' -ForegroundColor Green
     }
@@ -167,13 +167,15 @@ function gitmerge {
             'SIMULATED' { [ConsoleColor]::Magenta }
             default { [ConsoleColor]::Red }
         }
-        $targetCount = @($State.TargetBranches).Count
-        $integratedCount = @($State.IntegratedBranches).Count
-        $synchronizedCount = @($State.SynchronizedBranches).Count
+        $convergedList = [System.Collections.Generic.List[string]]::new()
+        foreach ($b in @($State.IntegratedBranches)) { if (-not $convergedList.Contains($b)) { $convergedList.Add($b) } }
+        foreach ($b in @($State.SynchronizedBranches)) { if (-not $convergedList.Contains($b)) { $convergedList.Add($b) } }
+        $convergedCount = $convergedList.Count
+        $skippedCount = @($State.SkippedBranches).Count
         $failedCount = @($State.FailedBranches).Count
 
         if ($State.Result -eq 'SUCCESS') {
-            Write-SuccessBanner -MainBranch $State.MainBranch -TargetCount $targetCount -MainPublished $State.MainPublished
+            Write-SuccessBanner -ConvergedCount $convergedCount
         }
 
         Write-Host ''
@@ -181,20 +183,16 @@ function gitmerge {
         Write-Host ("  Result                    : {0}" -f $State.Result) -ForegroundColor $resultColor
         Write-Host ("  Mode                      : {0}" -f $State.Mode)
         Write-Host ("  Repository                : {0}" -f $State.Repository)
-        Write-Host ("  Main branch               : {0}" -f $State.MainBranch)
+        Write-Host ("  Current branch            : {0}" -f $State.MainBranch)
         Write-Host ("  Worktrees                 : {0}" -f $State.WorktreeCount)
         Write-Host ("  Local branches            : {0}" -f $State.LocalBranchCount)
-        Write-Host ("  Target branches           : {0}" -f $targetCount)
-        if ($targetCount -gt 0) {
-            Write-Host ("    Targets                 : {0}" -f (@($State.TargetBranches) -join ', ')) -ForegroundColor DarkGray
+        Write-Host ("  Converged branches        : {0}" -f $convergedCount) -ForegroundColor $(if ($convergedCount -gt 0) { 'Green' } else { 'Gray' })
+        if ($convergedCount -gt 0) {
+            Write-Host ("    Converged               : {0}" -f ($convergedList -join ', ')) -ForegroundColor Green
         }
-        Write-Host ("  Integrated into main      : {0} / {1}" -f $integratedCount, $targetCount) -ForegroundColor $(if ($integratedCount -eq $targetCount) { 'Green' } else { 'Yellow' })
-        if ($integratedCount -gt 0) {
-            Write-Host ("    Integrated              : {0}" -f (@($State.IntegratedBranches) -join ', ')) -ForegroundColor Green
-        }
-        Write-Host ("  Synchronized branches     : {0} / {1}" -f $synchronizedCount, $targetCount) -ForegroundColor $(if ($synchronizedCount -eq $targetCount) { 'Green' } else { 'Yellow' })
-        if ($synchronizedCount -gt 0) {
-            Write-Host ("    Synchronized            : {0}" -f (@($State.SynchronizedBranches) -join ', ')) -ForegroundColor Green
+        Write-Host ("  Skipped branches          : {0}" -f $skippedCount)
+        if ($skippedCount -gt 0) {
+            Write-Host ("    Skipped                 : {0}" -f (@($State.SkippedBranches) -join ', ')) -ForegroundColor DarkGray
         }
         Write-Host ("  Failed branches           : {0}" -f $failedCount) -ForegroundColor $(if ($failedCount -eq 0) { 'Gray' } else { 'Red' })
         if ($failedCount -gt 0) {
@@ -203,7 +201,6 @@ function gitmerge {
         if (-not [string]::IsNullOrWhiteSpace($State.ConflictBranch)) {
             Write-Host ("  Conflict branch           : {0}" -f $State.ConflictBranch) -ForegroundColor Red
         }
-        Write-Host ("  Main published            : {0}" -f $State.MainPublished)
         Write-Host ("  Temporary cleanup         : {0}" -f $State.CleanupStatus)
         Write-Host ("  Elapsed                   : {0:n2}s" -f $State.Elapsed.TotalSeconds)
         if (-not [string]::IsNullOrWhiteSpace($State.FailureReason)) {
