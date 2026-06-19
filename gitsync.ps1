@@ -147,17 +147,24 @@ function gitsync {
             [string]$StageIcon,
             [ConsoleColor]$Color = [ConsoleColor]::Cyan
         )
+        # Record stage title for the workflow chain.
+        if ($null -ne $runStages) {
+            $stageCount = $runStages.Count
+            if ($stageCount -eq 0 -or $runStages[$stageCount - 1] -ne $Title) {
+                [void]$runStages.Add($Title)
+            }
+        }
         if ($null -ne $visual) {
             & $visual.WriteStage -Title $Title -Subtitle $Subtitle -StageIcon $StageIcon -Color $Color
             return
         }
         Write-Host ''
-        Write-Host '──────────────────────────────────────────────────────────────' -ForegroundColor DarkGray
+        Write-Host '--------------------------------------------------------------' -ForegroundColor DarkGray
         Write-Host "  $Title" -ForegroundColor $Color
         if (-not [string]::IsNullOrWhiteSpace($Subtitle)) {
             Write-Host "  $Subtitle" -ForegroundColor DarkGray
         }
-        Write-Host '──────────────────────────────────────────────────────────────' -ForegroundColor DarkGray
+        Write-Host '--------------------------------------------------------------' -ForegroundColor DarkGray
     }
 
     function Write-StatusLine {
@@ -177,18 +184,24 @@ function gitsync {
         param(
             [string]$Result,
             [string]$Mode,
+            [string]$Parameter,
             [string]$Repository,
             [string]$MainBranch,
             [string[]]$TargetBranches,
             [string[]]$PushBranches,
             [string[]]$PushedBranches,
             [string]$FailureReason,
-            [timespan]$Elapsed
+            [timespan]$Elapsed,
+            [System.Collections.Generic.List[string]]$Stages,
+            [System.Collections.Generic.List[object]]$Messages
         )
 
+        $modeTag = if ($Mode -eq 'debug') { '[DRY-RUN]' } else { '[LIVE]' }
+        $version = Get-GitMergeToolsVersion
         $resultColor = if ($Result -eq 'SUCCESS') { [ConsoleColor]::Green } elseif ($Result -eq 'SIMULATED') { [ConsoleColor]::Magenta } elseif ($Result -eq 'ACTION NEEDED') { [ConsoleColor]::Yellow } else { [ConsoleColor]::Red }
         Write-Host ''
-        Write-Host "═══════════════════  GIT SYNC SUMMARY  ═══════════════════" -ForegroundColor $resultColor
+        Write-Host "=== GIT SYNC SUMMARY  v$version  $modeTag ===" -ForegroundColor $resultColor
+        Write-Host ("  Parameter       : {0}" -f $Parameter)
         Write-Host ("  Result          : {0}" -f $Result) -ForegroundColor $resultColor
         Write-Host ("  Mode            : {0}" -f $Mode)
         Write-Host ("  Repository      : {0}" -f $Repository)
@@ -211,17 +224,36 @@ function gitsync {
         if (-not [string]::IsNullOrWhiteSpace($FailureReason)) {
             Write-Host ("  Failure reason  : {0}" -f $FailureReason) -ForegroundColor Red
         }
+
+        # Workflow chain (item 9).
+        if ($null -ne $Stages -and $Stages.Count -gt 0) {
+            Write-Host ("  Workflow        : {0}" -f ($Stages -join ' -> '))
+        }
+
         if ($Mode -ne 'debug' -and -not [string]::IsNullOrWhiteSpace($Repository) -and -not [string]::IsNullOrWhiteSpace($MainBranch)) {
             $recent = Get-RecentCommitLines -Repository $Repository -Branch $MainBranch
             if (@($recent).Count -gt 0) {
                 Write-Host ''
-                Write-Host "── Recent commits on $MainBranch ──" -ForegroundColor DarkGray
+                Write-Host "-- Recent commits on $MainBranch --" -ForegroundColor DarkGray
                 foreach ($line in @($recent)) {
                     Write-Host "   $line" -ForegroundColor DarkGray
                 }
             }
         }
-        Write-Host '══════════════════════════════════════════════════════════════' -ForegroundColor $resultColor
+
+        # Collected messages section (item 6): only when non-empty.
+        if ($null -ne $Messages -and $Messages.Count -gt 0) {
+            $errorMsgs  = @($Messages | Where-Object { $_.Level -eq 'ERROR' })
+            $warnMsgs   = @($Messages | Where-Object { $_.Level -eq 'WARNING' })
+            $noticeMsgs = @($Messages | Where-Object { $_.Level -eq 'NOTICE' })
+            Write-Host ''
+            Write-Host "  Notices & warnings ($($Messages.Count)):" -ForegroundColor Yellow
+            foreach ($m in $errorMsgs)  { Write-Host ("    [ERROR]   {0}" -f $m.Text) -ForegroundColor Red }
+            foreach ($m in $warnMsgs)   { Write-Host ("    [WARNING] {0}" -f $m.Text) -ForegroundColor Yellow }
+            foreach ($m in $noticeMsgs) { Write-Host ("    [NOTICE]  {0}" -f $m.Text) -ForegroundColor DarkGray }
+        }
+
+        Write-Host '==============================================================' -ForegroundColor $resultColor
     }
 
     $startedAt = Get-Date
@@ -232,6 +264,10 @@ function gitsync {
     $pushBranches = @()
     $pushedBranches = [System.Collections.Generic.List[string]]::new()
     $failureReason = ''
+    $runParameter = if ([string]::IsNullOrWhiteSpace($BranchName)) { '(default: current branch)' } else { $BranchName }
+    $runStages = [System.Collections.Generic.List[string]]::new()
+    $runMessages = [System.Collections.Generic.List[object]]::new()
+    $mode = Get-Mode $BranchName
 
     try {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -240,7 +276,6 @@ function gitsync {
         return $false
     }
 
-    $mode = Get-Mode $BranchName
     Write-RunBanner -DryRun ($mode -eq 'debug')
     $rootResult = Invoke-GitCommand '' @('rev-parse', '--show-toplevel') -SuppressError
     if ($rootResult.ExitCode -ne 0) {
@@ -542,6 +577,7 @@ function gitsync {
             SkippedBranches = [System.Collections.Generic.List[string]]::new()
             ConflictBranch = ''; MainPublished = 'NO'; CleanupStatus = 'NOT REQUIRED'
             FailureReason = ''; Elapsed = [timespan]::Zero; SummaryEnabled = $false
+            Stages = $runStages; Messages = $runMessages
         }
         if ($mode -eq 'current' -or $mode -eq 'single') {
             $mergeOk = [bool](@(Invoke-TwoBranchMerge -BranchName $BranchName -RunState $mergeState -Visual $visual) |
@@ -607,7 +643,7 @@ function gitsync {
     }
     finally {
         if (-not [string]::IsNullOrWhiteSpace($repository)) {
-            Write-SyncSummary -Result $syncResult -Mode $mode -Repository $repository -MainBranch $mainBranch -TargetBranches $targetBranches -PushBranches $pushBranches -PushedBranches $pushedBranches.ToArray() -FailureReason $failureReason -Elapsed ((Get-Date) - $startedAt)
+            Write-SyncSummary -Result $syncResult -Mode $mode -Parameter $runParameter -Repository $repository -MainBranch $mainBranch -TargetBranches $targetBranches -PushBranches $pushBranches -PushedBranches $pushedBranches.ToArray() -FailureReason $failureReason -Elapsed ((Get-Date) - $startedAt) -Stages $runStages -Messages $runMessages
             # Surface the visual upgrade advisory (no-op unless a tier was pinned but not reached, and not
             # suppressed), consistent with gitmerge so every command gives the same guidance.
             if ($null -ne $visual -and (Get-Command Write-GitMergeToolsUpgradeAdvisory -ErrorAction SilentlyContinue)) {

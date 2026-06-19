@@ -163,6 +163,7 @@ function gitmerge {
         }
 
         $modeTag = if ($State.DryRun) { '[DRY-RUN]' } else { '[LIVE]' }
+        $version = Get-GitMergeToolsVersion
         $resultColor = switch ($State.Result) {
             'SUCCESS' { [ConsoleColor]::Green }
             'SIMULATED' { [ConsoleColor]::Magenta }
@@ -180,7 +181,8 @@ function gitmerge {
         }
 
         Write-Host ''
-        Write-Host "═══════════════════  GIT MERGE SUMMARY  $modeTag  ═══════════════════" -ForegroundColor Cyan
+        Write-Host "=== GIT MERGE SUMMARY  v$version  $modeTag ===" -ForegroundColor Cyan
+        Write-Host ("  Parameter                 : {0}" -f $State.Parameter)
         Write-Host ("  Result                    : {0}" -f $State.Result) -ForegroundColor $resultColor
         Write-Host ("  Mode                      : {0}" -f $State.Mode)
         Write-Host ("  Repository                : {0}" -f $State.Repository)
@@ -208,19 +210,42 @@ function gitmerge {
             Write-Host ("  Failure reason            : {0}" -f $State.FailureReason) -ForegroundColor Red
         }
 
+        # Workflow chain (item 9): join stage titles with ->; dedupe consecutive already done by Add-RunStage.
+        $stateStages = $null
+        $stagesMembers = $State | Get-Member -Name 'Stages' -MemberType NoteProperty, Property -ErrorAction SilentlyContinue
+        if ($stagesMembers) { $stateStages = $State.Stages }
+        if ($null -ne $stateStages -and $stateStages.Count -gt 0) {
+            Write-Host ("  Workflow                  : {0}" -f ($stateStages -join ' -> '))
+        }
+
         if (-not $State.DryRun -and -not [string]::IsNullOrWhiteSpace($State.Repository) -and -not [string]::IsNullOrWhiteSpace($State.MainBranch)) {
             $recent = Get-RecentCommitLines -Repository $State.Repository -Branch $State.MainBranch
             if (@($recent).Count -gt 0) {
                 Write-Host ''
-                Write-Host "── Recent commits on $($State.MainBranch) ──" -ForegroundColor DarkGray
+                Write-Host "-- Recent commits on $($State.MainBranch) --" -ForegroundColor DarkGray
                 foreach ($line in @($recent)) {
                     Write-Host "   $line" -ForegroundColor DarkGray
                 }
             }
         }
 
+        # Collected messages section (item 6): only when non-empty.
+        $stateMessages = $null
+        $messagesMembers = $State | Get-Member -Name 'Messages' -MemberType NoteProperty, Property -ErrorAction SilentlyContinue
+        if ($messagesMembers) { $stateMessages = $State.Messages }
+        if ($null -ne $stateMessages -and $stateMessages.Count -gt 0) {
+            $errorMsgs = @($stateMessages | Where-Object { $_.Level -eq 'ERROR' })
+            $warnMsgs  = @($stateMessages | Where-Object { $_.Level -eq 'WARNING' })
+            $noticeMsgs = @($stateMessages | Where-Object { $_.Level -eq 'NOTICE' })
+            Write-Host ''
+            Write-Host "  Notices & warnings ($($stateMessages.Count)):" -ForegroundColor Yellow
+            foreach ($m in $errorMsgs)  { Write-Host ("    [ERROR]   {0}" -f $m.Text) -ForegroundColor Red }
+            foreach ($m in $warnMsgs)   { Write-Host ("    [WARNING] {0}" -f $m.Text) -ForegroundColor Yellow }
+            foreach ($m in $noticeMsgs) { Write-Host ("    [NOTICE]  {0}" -f $m.Text) -ForegroundColor DarkGray }
+        }
+
         Write-Host ''
-        Write-Host '══════════════════════════════════════════════════════════════' -ForegroundColor Cyan
+        Write-Host '==============================================================' -ForegroundColor Cyan
         if ($State.Result -eq 'SUCCESS') {
             Write-Host 'gitmerge finished.' -ForegroundColor Green
         }
@@ -235,9 +260,11 @@ function gitmerge {
     $mode = Get-Mode $BranchName
 
     $startedAt = Get-Date
+    $paramLabel = if ([string]::IsNullOrWhiteSpace($BranchName)) { '(default: current branch)' } else { $BranchName }
     $runState = [pscustomobject]@{
         DryRun                = ($mode -eq 'debug')
         Mode                  = $mode
+        Parameter             = $paramLabel
         Result                = 'FAILED'
         Repository            = ''
         MainBranch            = ''
@@ -254,6 +281,8 @@ function gitmerge {
         FailureReason         = ''
         Elapsed               = [timespan]::Zero
         SummaryEnabled        = $false
+        Stages                = [System.Collections.Generic.List[string]]::new()
+        Messages              = [System.Collections.Generic.List[object]]::new()
     }
 
     Write-RunBanner -DryRun $runState.DryRun

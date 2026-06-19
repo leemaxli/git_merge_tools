@@ -267,6 +267,7 @@ function Invoke-TwoBranchMerge {
 
     function Write-Stage {
         param([string]$Title, [string]$Subtitle, [string]$StageIcon, [ConsoleColor]$Color = [ConsoleColor]::Cyan)
+        Add-RunStage -State $RunState -Title $Title
         if ($null -ne $Visual) {
             & $Visual.WriteStage -Title $Title -Subtitle $Subtitle -StageIcon $StageIcon -Color $Color
             return
@@ -567,6 +568,7 @@ function Invoke-StarMerge {
 
     function Write-Stage {
         param([string]$Title, [string]$Subtitle, [string]$StageIcon, [ConsoleColor]$Color = [ConsoleColor]::Cyan)
+        Add-RunStage -State $RunState -Title $Title
         if ($null -ne $Visual) {
             & $Visual.WriteStage -Title $Title -Subtitle $Subtitle -StageIcon $StageIcon -Color $Color
             return
@@ -699,6 +701,7 @@ function Invoke-StarMerge {
             [void]$RunState.SkippedBranches.Add($B)
             Write-StatusLine -Marker '!' -Message "Skip '$B': worktree not clean." -Color Yellow
             Write-Warning "Skipping '$B': its worktree is not clean."
+            Add-RunMessage -State $RunState -Level 'NOTICE' -Text "Skipped '$B': worktree not clean."
             continue
         }
         # Probe merge of originalT + B in-memory (no worktree, no ref change).
@@ -707,6 +710,7 @@ function Invoke-StarMerge {
             [void]$RunState.SkippedBranches.Add($B)
             Write-StatusLine -Marker '!' -Message "Skip '$B': conflicts with hub baseline." -Color Yellow
             Write-Warning "Skipping '$B': conflicts with the hub baseline (merge-tree exit $($mtResult.ExitCode))."
+            Add-RunMessage -State $RunState -Level 'WARNING' -Text "Skipped '$B': conflicts with the hub baseline."
             continue
         }
         $spokeMergeTree = Get-FirstOutputLine $mtResult
@@ -754,6 +758,7 @@ function Invoke-StarMerge {
                 [void]$RunState.SkippedBranches.Add($c.Branch)
                 Write-StatusLine -Marker '!' -Message "Skip '$($c.Branch)': conflicts with another branch already merged into the hub." -Color Yellow
                 Write-Warning "Skipping '$($c.Branch)': conflicts with another branch already merged into the hub."
+                Add-RunMessage -State $RunState -Level 'WARNING' -Text "Skipped '$($c.Branch)': conflicts with another branch in the hub union."
                 continue
             }
             [void]$hubMergedB.Add($c)
@@ -970,6 +975,7 @@ function Invoke-MeshMerge {
 
     function Write-Stage {
         param([string]$Title, [string]$Subtitle, [string]$StageIcon, [ConsoleColor]$Color = [ConsoleColor]::Cyan)
+        Add-RunStage -State $RunState -Title $Title
         if ($null -ne $Visual) {
             & $Visual.WriteStage -Title $Title -Subtitle $Subtitle -StageIcon $StageIcon -Color $Color
             return

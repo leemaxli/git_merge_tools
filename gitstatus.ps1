@@ -129,17 +129,24 @@ function gitstatus {
             [string]$StageIcon,
             [ConsoleColor]$Color = [ConsoleColor]::Cyan
         )
+        # Record stage title for the workflow chain.
+        if ($null -ne $statusStages) {
+            $stageCount = $statusStages.Count
+            if ($stageCount -eq 0 -or $statusStages[$stageCount - 1] -ne $Title) {
+                [void]$statusStages.Add($Title)
+            }
+        }
         if ($null -ne $visual) {
             & $visual.WriteStage -Title $Title -Subtitle $Subtitle -StageIcon $StageIcon -Color $Color
             return
         }
         Write-Host ''
-        Write-Host '──────────────────────────────────────────────────────────────' -ForegroundColor DarkGray
+        Write-Host '--------------------------------------------------------------' -ForegroundColor DarkGray
         Write-Host "  $Title" -ForegroundColor $Color
         if (-not [string]::IsNullOrWhiteSpace($Subtitle)) {
             Write-Host "  $Subtitle" -ForegroundColor DarkGray
         }
-        Write-Host '──────────────────────────────────────────────────────────────' -ForegroundColor DarkGray
+        Write-Host '--------------------------------------------------------------' -ForegroundColor DarkGray
     }
 
     function Write-StatusLine {
@@ -254,17 +261,23 @@ function gitstatus {
         param(
             [string]$Result,
             [string]$Mode,
+            [string]$Parameter,
             [string]$Repository,
             [string]$MainBranch,
             [object[]]$Snapshots,
-            [timespan]$Elapsed
+            [timespan]$Elapsed,
+            [System.Collections.Generic.List[string]]$Stages,
+            [System.Collections.Generic.List[object]]$Messages
         )
 
+        $modeTag = if ($Mode -eq 'debug') { '[DRY-RUN]' } else { '[LIVE]' }
+        $version = Get-GitMergeToolsVersion
         $dirtyBranches = @($Snapshots | Where-Object { $_.DirtyCount -gt 0 })
         $checkedOutBranches = @($Snapshots | Where-Object { $_.StatusAvailable })
         $originTracked = @($Snapshots | Where-Object { $null -ne $_.OriginAhead })
         Write-Host ''
-        Write-Host '═══════════════════  GIT STATUS SUMMARY  ═══════════════════' -ForegroundColor Cyan
+        Write-Host "=== GIT STATUS SUMMARY  v$version  $modeTag ===" -ForegroundColor Cyan
+        Write-Host ("  Parameter       : {0}" -f $Parameter)
         Write-Host ("  Result          : {0}" -f $Result) -ForegroundColor $(if ($Result -eq 'SUCCESS') { 'Green' } else { 'Red' })
         Write-Host ("  Mode            : {0}" -f $Mode)
         Write-Host ("  Repository      : {0}" -f $Repository)
@@ -279,17 +292,35 @@ function gitstatus {
         Write-Host ("  Dirty branches  : {0}" -f $dirtyBranches.Count) -ForegroundColor $(if ($dirtyBranches.Count -eq 0) { 'Green' } else { 'Yellow' })
         Write-Host ("  Origin tracked  : {0} / {1}" -f $originTracked.Count, @($Snapshots).Count)
         Write-Host ("  Elapsed         : {0:n2}s" -f $Elapsed.TotalSeconds)
-        Write-Host '══════════════════════════════════════════════════════════════' -ForegroundColor Cyan
+
+        # Workflow chain (item 9).
+        if ($null -ne $Stages -and $Stages.Count -gt 0) {
+            Write-Host ("  Workflow        : {0}" -f ($Stages -join ' -> '))
+        }
+
+        Write-Host '==============================================================' -ForegroundColor Cyan
 
         if (@($Snapshots).Count -gt 1) {
             Write-Host ''
-            Write-Host '═══════════════════  COMPARISON SUMMARY  ═══════════════════' -ForegroundColor Magenta
+            Write-Host '=== COMPARISON SUMMARY ===' -ForegroundColor Magenta
             foreach ($snapshot in @($Snapshots)) {
                 $mainText = if ($null -eq $snapshot.MainAhead) { 'main comparison unavailable' } else { "main +$($snapshot.MainAhead) / -$($snapshot.MainBehind)" }
                 $originText = if ($null -eq $snapshot.OriginAhead) { 'origin none' } else { "origin +$($snapshot.OriginAhead) / -$($snapshot.OriginBehind)" }
                 Write-Host ("  {0,-28} {1,-18} {2,-18} dirty {3}" -f $snapshot.Branch, $mainText, $originText, $snapshot.DirtyCount)
             }
-            Write-Host '══════════════════════════════════════════════════════════════' -ForegroundColor Magenta
+            Write-Host '==============================================================' -ForegroundColor Magenta
+        }
+
+        # Collected messages section (item 6): only when non-empty.
+        if ($null -ne $Messages -and $Messages.Count -gt 0) {
+            $errorMsgs  = @($Messages | Where-Object { $_.Level -eq 'ERROR' })
+            $warnMsgs   = @($Messages | Where-Object { $_.Level -eq 'WARNING' })
+            $noticeMsgs = @($Messages | Where-Object { $_.Level -eq 'NOTICE' })
+            Write-Host ''
+            Write-Host "  Notices & warnings ($($Messages.Count)):" -ForegroundColor Yellow
+            foreach ($m in $errorMsgs)  { Write-Host ("    [ERROR]   {0}" -f $m.Text) -ForegroundColor Red }
+            foreach ($m in $warnMsgs)   { Write-Host ("    [WARNING] {0}" -f $m.Text) -ForegroundColor Yellow }
+            foreach ($m in $noticeMsgs) { Write-Host ("    [NOTICE]  {0}" -f $m.Text) -ForegroundColor DarkGray }
         }
     }
 
@@ -297,6 +328,9 @@ function gitstatus {
     $mode = Get-Mode $BranchName
     $repository = ''
     $mainBranch = ''
+    $statusParameter = if ([string]::IsNullOrWhiteSpace($BranchName)) { '(default: current branch)' } else { $BranchName }
+    $statusStages = [System.Collections.Generic.List[string]]::new()
+    $statusMessages = [System.Collections.Generic.List[object]]::new()
     Write-RunBanner -DryRun ($mode -eq 'debug')
 
     try {
@@ -362,6 +396,7 @@ function gitstatus {
 
         if ($mode -eq 'debug') {
             Write-Stage -Title 'STATUS PREVIEW' -Subtitle 'Would render status, log, and comparisons' -StageIcon 'STATUS' -Color Magenta
+            Write-StatusSummary -Result 'SIMULATED' -Mode $mode -Parameter $statusParameter -Repository $repository -MainBranch $mainBranch -Snapshots @() -Elapsed ((Get-Date) - $startedAt) -Stages $statusStages -Messages $statusMessages
             return $true
         }
 
@@ -378,7 +413,7 @@ function gitstatus {
             Write-BranchSnapshot -Snapshot $snapshot -ShowComparison ($mode -in @('all', 'cross-all'))
         }
 
-        Write-StatusSummary -Result 'SUCCESS' -Mode $mode -Repository $repository -MainBranch $mainBranch -Snapshots $snapshots.ToArray() -Elapsed ((Get-Date) - $startedAt)
+        Write-StatusSummary -Result 'SUCCESS' -Mode $mode -Parameter $statusParameter -Repository $repository -MainBranch $mainBranch -Snapshots $snapshots.ToArray() -Elapsed ((Get-Date) - $startedAt) -Stages $statusStages -Messages $statusMessages
         return $true
     }
     finally {

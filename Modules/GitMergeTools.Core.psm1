@@ -301,6 +301,36 @@ function Get-GitMergeToolsAbout {
     }
 }
 
+function Add-RunMessage {
+    # Appends a structured message to $State.Messages if the member exists (safe if caller lacks it).
+    # Level: WARNING | NOTICE | ERROR. Text: the message string.
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][ValidateSet('WARNING', 'NOTICE', 'ERROR')][string]$Level,
+        [Parameter(Mandatory)][string]$Text
+    )
+    if ($null -eq $State) { return }
+    $members = $State | Get-Member -Name 'Messages' -MemberType NoteProperty, Property -ErrorAction SilentlyContinue
+    if (-not $members) { return }
+    if ($null -eq $State.Messages) { return }
+    [void]$State.Messages.Add([pscustomobject]@{ Level = $Level; Text = $Text })
+}
+
+function Add-RunStage {
+    # Appends a stage title to $State.Stages (dedupe: skips if identical to the last entry).
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][string]$Title
+    )
+    if ($null -eq $State) { return }
+    $members = $State | Get-Member -Name 'Stages' -MemberType NoteProperty, Property -ErrorAction SilentlyContinue
+    if (-not $members) { return }
+    if ($null -eq $State.Stages) { return }
+    $count = $State.Stages.Count
+    if ($count -gt 0 -and $State.Stages[$count - 1] -ceq $Title) { return }
+    [void]$State.Stages.Add($Title)
+}
+
 Export-ModuleMember -Function @(
     'Invoke-GitCommand',
     'Get-FirstOutputLine',
@@ -317,5 +347,7 @@ Export-ModuleMember -Function @(
     'Get-UniqueBranchList',
     'Get-RecentCommitLines',
     'Get-GitMergeToolsVersion',
-    'Get-GitMergeToolsAbout'
+    'Get-GitMergeToolsAbout',
+    'Add-RunMessage',
+    'Add-RunStage'
 )

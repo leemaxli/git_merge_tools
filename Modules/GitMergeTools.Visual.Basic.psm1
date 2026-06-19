@@ -104,6 +104,7 @@ function New-GitMergeToolsVisualBasic {
     $writeRunSummary = {
         param([Parameter(Mandatory)]$State, [string[]]$RecentLines, [string]$Name)
         $modeTag = if ($State.DryRun) { '[DRY-RUN]' } else { '[LIVE]' }
+        $version = Get-GitMergeToolsVersion
         $borderColor = if ($State.Result -eq 'SUCCESS') { $theme.Success } elseif ($State.Result -eq 'SIMULATED') { [ConsoleColor]::Magenta } else { $theme.Error }
         $convergedList = [System.Collections.Generic.List[string]]::new()
         foreach ($b in @($State.IntegratedBranches)) { if (-not $convergedList.Contains($b)) { $convergedList.Add($b) } }
@@ -111,8 +112,12 @@ function New-GitMergeToolsVisualBasic {
         $convergedCount = $convergedList.Count
         $skippedCount = @($State.SkippedBranches).Count; $failedCount = @($State.FailedBranches).Count
         if ($State.Result -eq 'SUCCESS') { & $writeSuccessBannerForSummary -ConvergedCount $convergedCount -Name $Name }
+        $paramLabel = $null
+        $paramMembers = $State | Get-Member -Name 'Parameter' -MemberType NoteProperty, Property -ErrorAction SilentlyContinue
+        if ($paramMembers) { $paramLabel = $State.Parameter }
         Write-Host ''
-        Write-Host "GIT MERGE SUMMARY $modeTag" -ForegroundColor $borderColor
+        Write-Host "GIT MERGE SUMMARY  v$version  $modeTag" -ForegroundColor $borderColor
+        if (-not [string]::IsNullOrWhiteSpace($paramLabel)) { Write-Host ("  Parameter                 : {0}" -f $paramLabel) }
         Write-Host ("  Result                    : {0}" -f $State.Result) -ForegroundColor $borderColor
         Write-Host ("  Mode                      : {0}" -f $State.Mode)
         Write-Host ("  Repository                : {0}" -f $State.Repository)
@@ -129,9 +134,26 @@ function New-GitMergeToolsVisualBasic {
         Write-Host ("  Temporary cleanup         : {0}" -f $State.CleanupStatus)
         Write-Host ("  Elapsed                   : {0:n2}s" -f $State.Elapsed.TotalSeconds)
         if (-not [string]::IsNullOrWhiteSpace($State.FailureReason)) { Write-Host ("  Failure reason            : {0}" -f $State.FailureReason) -ForegroundColor $theme.Error }
+        # Workflow chain.
+        $stagesMembers = $State | Get-Member -Name 'Stages' -MemberType NoteProperty, Property -ErrorAction SilentlyContinue
+        if ($stagesMembers -and $null -ne $State.Stages -and $State.Stages.Count -gt 0) {
+            Write-Host ("  Workflow                  : {0}" -f ($State.Stages -join ' -> '))
+        }
         if (-not $State.DryRun -and -not [string]::IsNullOrWhiteSpace($State.MainBranch) -and @($RecentLines).Count -gt 0) {
             Write-Host ''; Write-Host "Recent commits on $($State.MainBranch):"
             foreach ($line in @($RecentLines)) { Write-Host "   $line" }
+        }
+        # Collected messages section.
+        $messagesMembers = $State | Get-Member -Name 'Messages' -MemberType NoteProperty, Property -ErrorAction SilentlyContinue
+        if ($messagesMembers -and $null -ne $State.Messages -and $State.Messages.Count -gt 0) {
+            $errorMsgs  = @($State.Messages | Where-Object { $_.Level -eq 'ERROR' })
+            $warnMsgs   = @($State.Messages | Where-Object { $_.Level -eq 'WARNING' })
+            $noticeMsgs = @($State.Messages | Where-Object { $_.Level -eq 'NOTICE' })
+            Write-Host ''
+            Write-Host "  Notices & warnings ($($State.Messages.Count)):" -ForegroundColor Yellow
+            foreach ($m in $errorMsgs)  { Write-Host ("    [ERROR]   {0}" -f $m.Text) -ForegroundColor $theme.Error }
+            foreach ($m in $warnMsgs)   { Write-Host ("    [WARNING] {0}" -f $m.Text) -ForegroundColor Yellow }
+            foreach ($m in $noticeMsgs) { Write-Host ("    [NOTICE]  {0}" -f $m.Text) -ForegroundColor $theme.Info }
         }
         Write-Host ''
         if ($State.Result -eq 'SUCCESS') { Write-Host "$Name finished." -ForegroundColor $theme.Success } elseif ($State.Result -eq 'SIMULATED') { Write-Host "$Name dry-run finished; no changes were made." -ForegroundColor ([ConsoleColor]::Magenta) } else { Write-Host "$Name stopped before full completion." -ForegroundColor $theme.Error }
