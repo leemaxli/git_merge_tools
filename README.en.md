@@ -2,45 +2,27 @@
 
 [:cn: 简体中文](README.md) · :us: **English**
 
-**Current version v7.3** · see [Version history](#version-history) below
+![version](https://img.shields.io/badge/version-v7.4.0-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Cross-platform PowerShell helpers for **safe, transactional** local Git branch consolidation —
-with an auto-degrading, capability-aware visual layer. Runs on **PowerShell 7+** (preferred) and
-**Windows PowerShell 5.1**, on Windows / Linux / macOS.
+**Safe, transactional Git branch consolidation** — three cross-platform PowerShell commands with an auto-degrading, capability-aware visual layer.
 
-> **Core guarantee:** these tools never force-move or delete your branches, never `reset`/`rebase`,
-> and only ever push with `git push --atomic`. Main advances only after *every* requested merge
-> succeeds in a throwaway worktree; on any failure nothing is changed. If a working tree is dirty or
-> a merge conflicts, the operation refuses and leaves all refs untouched.
+## What it is
 
-## Commands
+GitMergeTools provides three commands for consolidating local Git branches without data loss:
 
-| Command | What it does |
-|---------|--------------|
-| `gitmerge` | Transactionally consolidates local branches through `main`/`master`: merges the selected branch(es) into a temporary worktree, and only after all merges succeed fast-forwards the real `main`, then fast-forwards the selected branches to it. |
-| `gitsync` | Verifies the remote is safe, runs the same local consolidation, then pushes `main` + the synchronized branches to `origin` with a single `git push --atomic`. |
-| `gitstatus` | Read-only enhanced status, recent log, and branch-vs-main / branch-vs-origin comparison. Never changes refs. |
+| Command | Mode | What it does |
+|---------|------|--------------|
+| `gitmerge` | **Local only** | Transactional local branch consolidation: validates all merges in a throwaway worktree, fast-forwards real refs only after every merge succeeds |
+| `gitsync` | **With remote** | Same topology as gitmerge, but additionally safe-pulls each involved `origin/<branch>` before, then pushes each branch's own `origin/<branch>` after (per-branch, single-ref, never forced) |
+| `gitstatus` | **Read-only** | Enhanced status, recent commit log (with chain graph), and branch-vs-`origin/<branch>` comparisons; never changes refs |
 
-**Argument forms** (same for all three):
+**Safety first:** the tools never force-move or delete branches, never `reset`/`rebase`, never force-push. Every ref move is a fast-forward or compare-and-swap, validated in a throwaway worktree first; any failure changes nothing.
 
-- *(empty)* — the current branch
-- `all` / `cross-all` — every local branch (incl. `main`/`master`)
-- `debug` — dry-run: report the plan without changing refs, worktrees, or remotes
-- *any other value* — that one local branch
+**Requirements:** PowerShell 7.x (preferred) or Windows PowerShell 5.1; git 2.x. Cross-platform goal: Windows / Linux / macOS.
 
-A target branch that has an **unmerged descendant** branch (a "sub-branch" with work not yet merged
-back) is **skipped with a warning** rather than silently consolidated.
+## Install & setup
 
-**Remote ahead (new in v6.0):** when `origin/<branch>` is ahead of (or has diverged from) your local
-branch, `gitsync` now stops with an actionable **`ACTION NEEDED`** prompt telling you to pull first —
-instead of failing cryptically — and changes nothing. Automatic *safe* pulling (fast-forward only, then
-clean merges) is rolling out incrementally across v6.x.
-
-## Install
-
-Keep the three command scripts (`gitmerge.ps1`, `gitsync.ps1`, `gitstatus.ps1`) at the top of the
-install folder, with the `Modules/` subfolder holding the `GitMergeTools.*.psm1` modules right beside
-them (the repository's own layout):
+Clone the repository (or download it) and keep this layout:
 
 ```
 GitMergeTools/
@@ -51,107 +33,189 @@ GitMergeTools/
    └─ GitMergeTools.*.psm1
 ```
 
-Then dot-source the three commands from your PowerShell profile (do this in **both** the PowerShell 7
-and Windows PowerShell 5.1 profile roots if you use both):
+Dot-source the three scripts from your PowerShell profile (`$PROFILE`):
 
 ```powershell
-# in $PROFILE
+# in $PROFILE (add to both profiles if you use pwsh 7 and 5.1)
 . 'C:\path\to\GitMergeTools\gitmerge.ps1'
 . 'C:\path\to\GitMergeTools\gitsync.ps1'
 . 'C:\path\to\GitMergeTools\gitstatus.ps1'
 ```
 
-The loaders look for the modules in the `Modules/` subfolder first and still tolerate a flat layout
-(everything in one folder). If the commands are loaded in a way where `$PSScriptRoot` can't resolve
-(e.g. pasted directly into a profile), set `GITMERGE_TOOLS_HOME` to the install folder.
+If `$PSScriptRoot` can't resolve (e.g. functions pasted directly into a profile), set an env-var override:
 
-## Visual tiers
+```powershell
+$env:GITMERGE_TOOLS_HOME = 'C:\path\to\GitMergeTools'
+```
 
-Output auto-detects the terminal's capabilities and picks the richest tier that renders safely,
-degrading high → low. Machine-relevant output (exit codes, git errors) is always independent of the tier.
+## The three commands
+
+### gitmerge — local-only consolidation
+
+Converges branches bidirectionally to their union commit, **entirely locally** (no fetch, no pull, no push). All merges are validated in a throwaway temporary worktree; real refs are fast-forwarded only after every merge succeeds.
+
+### gitsync — with remote sync
+
+Identical topology to gitmerge, but additionally performs a safe pull of each involved `origin/<branch>` before consolidation (fast-forward or conflict-free merge), then pushes each converged branch to its own `origin/<branch>` afterward (single-ref ordinary push; rejected pushes are skipped, never forced).
+
+### gitstatus — read-only status
+
+Shows working-tree status, a recent commit log with a chain graph, and per-branch ahead/behind counts against `origin/<branch>`. Never modifies any ref or remote state.
+
+## Parameters & topologies
+
+All three commands share the same argument forms:
+
+| Argument | Topology | Description |
+|----------|----------|-------------|
+| *(empty)* | **2-branch** | Current branch ↔ `main`, bidirectional convergence to their union |
+| `{branch}` | **2-branch** | Current branch ↔ named branch, bidirectional, de-main-centered |
+| `all` | **Star** | Current branch (hub) absorbs every other branch; each spoke reverse-merges the hub's original commit |
+| `cross-all` | **Mesh** | Every branch converges to one union commit |
+| `debug` | **Dry-run** | Dry-run of `cross-all`: reports the plan, changes nothing |
+
+### Star vs Mesh illustrated
+
+```
+Star (gitmerge all):           Mesh (gitmerge cross-all):
+
+   spoke-A                        branch-A ─┐
+      ↑↓                                    ├─→ [union commit]
+   [HUB] ←→ spoke-B              branch-B ─┤       ↑
+      ↑↓                                    │   (all branches
+   spoke-C                        branch-C ─┘  fast-forward here)
+
+hub = current branch, absorbs    all branches converge to one union
+every spoke                      conflict → fail-fast (nothing changes)
+each spoke = original-hub ∪ spoke dirty branch → skip, rest converge
+conflicting/dirty spoke → skip
+hub dirty → abort entire run
+```
+
+**Sub-branch skip:** if a target branch has an unmerged descendant (a "sub-branch" with uncommitted-back work), it is skipped with a warning rather than silently consolidated.
+
+## Usage examples
+
+```powershell
+# --- gitmerge ---
+
+# Converge current branch and main bidirectionally (most common)
+gitmerge
+
+# Converge current branch and feature/login bidirectionally
+gitmerge feature/login
+
+# Current branch (hub) absorbs all others (star topology)
+gitmerge all
+
+# All branches converge to one union commit (mesh topology)
+gitmerge cross-all
+
+# Preview the cross-all plan without changing anything
+gitmerge debug
+
+# --- gitsync ---
+
+# Pull + merge + push: current branch and main
+gitsync
+
+# Pull + merge + push: all branches, star topology
+gitsync all
+
+# Pull + merge + push: all branches, mesh topology
+gitsync cross-all
+
+# --- gitstatus ---
+
+# Show current branch status and recent log
+gitstatus
+
+# Show ahead/behind for all branches
+gitstatus all
+```
+
+## Safety model
+
+**Hard constraint (non-negotiable):** no code path may delete, overwrite, force-move, `reset`, `rebase`, or non-atomically push in a way that could lose work or corrupt a repository.
+
+Specific guarantees:
+
+- **No force-push / reset / rebase:** all pushes are ordinary single-ref `git push`; rejected by the remote → skipped, never `--force`.
+- **Throwaway worktree validation:** every merge is validated in a one-shot temporary worktree; real refs advance only after every merge succeeds.
+- **Fast-forward / compare-and-swap:** real ref moves are either fast-forwards or compare-and-swap `update-ref` calls (guarding against concurrent writers).
+- **Conflict handling:**
+  - `all` (star): conflicting or dirty spoke → skip and proceed; dirty hub → abort.
+  - `cross-all` (mesh): any conflict → fail-fast abort, nothing changes.
+  - 2-branch: conflict → refuse, all refs remain untouched.
+- **Conflicts are never auto-resolved:** the tool always stops and prompts the user.
+- **Dirty working trees:** any branch with uncommitted changes is skipped (batch modes) or triggers a refusal (single-branch mode).
+
+## Visuals & summary
+
+### Visual tiers
+
+Output auto-detects terminal capabilities and picks the richest tier that renders safely, degrading high → low. Machine-relevant output (exit codes, git errors) is always tier-independent.
 
 | Tier | Requires | Look |
 |------|----------|------|
-| `rich` | UTF-8 output + a Unicode-capable terminal | top tier: emoji + Unicode box-drawing + color |
+| `rich` | UTF-8 output + a Unicode-capable terminal | emoji + Unicode box-drawing + color |
 | `standard` | UTF-8 output | Unicode box-drawing, no emoji |
 | `basic` | — | pure ASCII, no color |
 
-## Environment variables
+Pin a tier with `GITMERGE_VISUAL_MODE` (`rich`/`standard`/`basic`); `auto` (default) selects automatically.
+
+### Run banner & summary
+
+Every run displays:
+- **Banner:** version + repository URL + author, in aligned box format
+- **Summary header:** version + `[LIVE]` (real run) or `[DRY-RUN]` (debug mode)
+- **Invocation parameter:** which argument / topology was used
+- **Workflow chain:** a compact display of pipeline stages
+- **Notices/Warnings:** a consolidated block of notices and warnings
+- **Recent log:** recent commits with a commit-chain graph, tier-aware color/emoji
+
+### Environment variables
 
 | Var | Values | Meaning |
 |-----|--------|---------|
-| `GITMERGE_VISUAL_MODE` | `auto` (default) `\| rich \| standard \| basic` | Pin a visual tier; still capability-checked (a pinned tier that can't render degrades). (`max` is still accepted as a compatibility alias for `rich`.) |
-| `GITMERGE_TOOLS_SUPPRESS_WARNING` | truthy (`1`/`true`/`yes`/`on`) | Silence tier/upgrade notices. Git errors/warnings always surface. |
-| `GITMERGE_TOOLS_HOME` | path | Install-folder override for module discovery. |
-
-When you pin a tier the environment can't reach, the end-of-run summary explains how to reach it
-(unless suppressed).
-
-## Tests
-
-Dependency-free — no Pester required. Tests run in throwaway Git repos under the OS temp dir with a
-hermetic Git environment and a path-containment guard, on both runtimes:
-
-```powershell
-pwsh tests/Invoke-CrossRuntime.ps1         # runs the suite under pwsh 7 and Windows PowerShell 5.1
-pwsh tests/Invoke-GitMergeToolsTests.ps1   # current runtime only
-```
-
-## Status
-
-Functional and fully tested (all known defects fixed; 103-test suite green on both runtimes). **The
-core of the structural refactor is done**: `Core.psm1` (git primitives) and `Merge.psm1` (the
-transactional engine) are extracted, the three commands are thin peers on one engine with no
-cross-command coupling; the remaining environment-module merge and git-safety hardening are in progress.
+| `GITMERGE_VISUAL_MODE` | `auto` (default) \| `rich` \| `standard` \| `basic` | Pin a visual tier (`max` is still accepted as a compatibility alias for `rich`) |
+| `GITMERGE_TOOLS_SUPPRESS_WARNING` | truthy (`1`/`true`/`yes`/`on`) | Silence tier/upgrade notices; git errors/warnings always surface |
+| `GITMERGE_TOOLS_HOME` | path | Install-folder override for module discovery |
 
 ## Version history
 
-> Current version: **v7.3**. Early v1–v3 predate Git tracking and are a summarized retrospective;
-> from v4 on, the history follows the Git commit log.
-> Old-history trimming: versions more than 5 majors back keep only their major (`.0`) line (at v7.x, v1 and v2 keep just their `.0`).
+> Current version: **v7.4.0**. Early v1–v3 predate Git tracking and are a summarized retrospective; from v4 on, the history follows the Git commit log.
+>
+> **History-trimming rule:** the current major lists every sub-version; each older major keeps 3–6 milestone sub-versions (fewer the older); majors more than 5 back get a single one-line summary.
 
 **v7.x — Topology redefinition: star / mesh, de-main-centered (current)**
-- **v7.3** — `gitsync` adopts the new topologies + **per-branch remote sync**: each mode (2-branch / all / cross-all) = the matching `gitmerge` topology, wrapped with a safe pull of every involved `origin/<branch>` before, and a **per-branch** single-ref ordinary push of each converged branch's own `origin/<branch>` after (skip-on-reject, never forced) — replacing the old "through-main + one atomic push of main+branches". An unsafe `main` or star hub aborts.
-- **v7.2** — `gitmerge cross-all` becomes a **de-main-centered full mesh**: all branches converge to one union commit (current branch is the base, `main` is just a participant); a merge conflict → fail-fast abort (nothing changed), a dirty-worktree branch → skipped while the rest converge; `gitmerge debug` is now a dry-run of that mesh (reports only, changes nothing). `gitsync` unchanged for now.
-- **v7.1** — `gitmerge all` becomes a **current-branch star**: the hub (current branch) absorbs every other branch (hub = union of all), and each other branch reverse-merges the hub's **original** commit (`branch = original-hub ∪ branch`, with no spoke-to-spoke transfer); a conflicting or dirty-worktree spoke is skipped and the rest proceed (skip-and-proceed), while a dirty hub worktree aborts the whole run. `cross-all`/`debug`/`gitsync` unchanged for now.
-- **v7.0** — `gitmerge` (empty / `{branch}`) now merges the **current branch and the target** bidirectionally, de-main-centered: `gitmerge {branch}` merges the current branch with that branch (no longer through `main`); `gitmerge` naming the current branch is a no-op reminder; `gitmerge main` from a feature converges feature↔main; a target with an unmerged descendant now converges anyway (a pure fast-forward — no commit is lost). `all`/`cross-all`/`debug`/`gitsync` unchanged for now.
+- **v7.4** — UX & quality: run banner shows version, repo URL, and author in aligned box format; unified summary header (version + `[LIVE]`/`[DRY-RUN]`) across all three commands; summary now shows the invocation parameter, a compact workflow chain, and a consolidated notices/warnings section; richer recent-log with a commit-chain graph and tier-aware color/emoji; plus the dead through-main engine removed and shared helpers extracted.
+- **v7.3** — `gitsync` adopts the new topologies + **per-branch remote sync**: each mode (2-branch / all / cross-all) = the matching `gitmerge` topology, wrapped with a safe pull of every involved `origin/<branch>` before, and a per-branch single-ref ordinary push of each converged branch's own `origin/<branch>` after (skip-on-reject, never forced) — replacing the old "through-main + one atomic push" model. An unsafe `main` or star hub aborts.
+- **v7.2** — `gitmerge cross-all` becomes a **de-main-centered full mesh**: all branches converge to one union commit; a merge conflict → fail-fast abort (nothing changed); a dirty-worktree branch → skipped; `gitmerge debug` is now a dry-run of that mesh.
+- **v7.1** — `gitmerge all` becomes a **current-branch star**: the hub absorbs all branches; each spoke reverse-merges the hub's original commit; conflicting/dirty spokes skip, dirty hub aborts.
+- **v7.0** — `gitmerge` (empty / `{branch}`) becomes **bidirectional convergence of the current branch and the target**, de-main-centered.
 
 **v6.x — Remote sync: pull, not just push**
-- **v6.8.0** — All three commands' run summaries now show 10 recent commits (was 5); `gitsync`'s summary gains a "recent commits" block it previously lacked.
-- **v6.7.1** — Test-only: safety regression-locks for the two most dangerous operations — a meta-scan pinning gitsync's `push --atomic` (and that gitmerge/gitstatus/engine never push), and negative-case tests for `Test-TemporaryWorktreeForCleanup`, the gate before the only `git worktree remove --force`.
-- **v6.7.0** — Skip-and-proceed (gitsync): with `all`/`cross-all`, `gitsync` now **skips** a non-main branch that can't be safely pulled (dirty worktree, or a conflicting divergence) and syncs the rest, instead of aborting the whole run. The skipped branch is excluded from the pull, the consolidation, **and** the push (never force-pushed) and is left untouched. A single explicitly-selected branch, or an unsafe `main`, still stops with `ACTION NEEDED`.
-- **v6.6.0** — Skip-and-proceed (engine): `gitmerge`/`gitsync` with `all`/`cross-all` no longer abort the whole run when a *non-main* target branch's worktree can't safely participate (dirty, or mid-merge/rebase/cherry-pick/revert) — that branch is **skipped with a warning** and the rest still consolidate (consistent with the `#10` sub-branch skip). A dirty or in-progress **main** worktree still aborts, since everything is consolidated through main.
-- **v6.5.0** — The `gitsync` / `gitstatus` run summary now shows the **remote location** (origin URL), not just the local repository path — so you can see where you're syncing/comparing against.
-- **v6.4.1** — Safety fix (found by an adversarial review of the v6.x code): the two worktree-free pull paths now compare-and-swap against the branch tip **captured at classify time** (via the new `Move-BranchRefSafely`, with a true-fast-forward guard) instead of a freshly re-read tip. This closes a between-pass race where a branch advanced by a *concurrent* writer could be force-moved sideways (orphaning the new commit) or merged onto a stale tree. The checked-out paths were already safe (a live `git merge` re-validates).
-- **v6.4.0** — Stage 4 (checked-out): the divergent clean-merge auto-sync now also covers a **checked-out branch with a clean worktree** — the common case where your *current* branch has diverged from origin — applied via `merge --no-edit` after the same in-memory `merge-tree` validation. A dirty worktree or a conflicting merge still prompts. This completes the safe-sync rollout: `gitsync` now auto-pulls/merges every case it can do without risking your work (fast-forwards and conflict-free merges), and prompts for the rest (dirty worktree, conflicting divergence) — never resetting, rebasing, or force-pushing.
-- **v6.3.0** — Stage 4 (not-checked-out): `gitsync` auto-*merges* a **not-checked-out** branch that has diverged from origin **when the merge is clean** — validated in-memory with `git merge-tree` (no worktree touched, no ref changed), then applied worktree-free via `commit-tree` + a compare-and-swap `update-ref`. Conflicting divergences are never auto-resolved; they still prompt.
-- **v6.2.0** — Stage 3: `gitsync` also auto fast-forward-pulls a branch that *is* checked out, when its worktree is **clean** (via `merge --ff-only` in that worktree) — covering the common case of the current branch trailing origin. A dirty worktree is never touched; it still prompts.
-- **v6.1.0** — Stage 2: `gitsync` now *auto* fast-forward-pulls a branch that origin is ahead of when that branch is **not checked out** in any worktree (a compare-and-swap `update-ref` — the safest pull, no working tree to disturb). The REMOTE PULL phase is all-or-nothing: it classifies every branch read-only first, and if any branch still can't be safely synced (a checked-out fast-forward, or a divergence) it changes nothing and prompts.
-- **v6.0.0** — Critical gap fix: `gitsync` no longer hard-errors when `origin` is ahead of (or diverged from) a local branch. A new **REMOTE PULL phase** classifies each branch it will sync (`UpToDate`/`LocalAhead`/`FastForwardable`/`Diverged`) and, when a pull is required, stops with an actionable **`ACTION NEEDED`** prompt (e.g. `git pull --ff-only origin <branch>`) — changing nothing — instead of a cryptic failure. This is Stage 1 of a staged rollout; automatic *safe* pulling (fast-forward-only, then throwaway-worktree-validated clean merges) arrives in later v6.x sub-versions. `gitmerge` is unchanged.
+- **v6.8.0** — Recent commit log grows from 5 to 10 entries; `gitsync` summary gains its missing recent-commits block.
+- **v6.7.1** — Test-only: safety regression-locks for the two most dangerous operations (gitsync `push --atomic` meta-scan and negative-case tests for `Test-TemporaryWorktreeForCleanup`).
+- **v6.7.0** — Skip-and-proceed (gitsync): non-main branches that can't be safely pulled are skipped and the rest synced; never force-pushed.
+- **v6.4.1** — Safety fix: two worktree-free pull paths now compare-and-swap against the tip captured at classify time, closing a between-pass concurrency race.
+- **v6.4.0** — Stage 4: checked-out branches with a clean worktree can also be auto-merged without conflict; safe-sync rollout complete.
+- **v6.0.0** — Critical gap fix: `gitsync` no longer hard-errors when origin is ahead; new REMOTE PULL phase classifies each branch and stops with an actionable `ACTION NEEDED` prompt instead of a cryptic failure.
 
-**v5.x — Modularization, engine unification & hardening** (condensed; full per-version detail in the Git log)
-- **v5.5.0–v5.10.0** — Slimming + git-safety wave: modules moved into a `Modules/` subfolder; a non-interactive, long-path-safe git profile (`GIT_TERMINAL_PROMPT=0`, `GIT_EDITOR=true`, `core.longpaths`, `rerere` off); an in-progress-op preflight (refuse a worktree mid-merge/rebase/cherry-pick/revert); the upgrade advisory surfaced from all three commands; encoding/i18n path tests; and `gitsync` pushing exactly the engine's synchronized set.
-- **v5.4.0** — Anti-over-engineering: folded the `max` tier into `rich` and deleted it (`max` stays a compatibility alias); visual tiers are now `rich/standard/basic`.
-- **v5.1.0–v5.3.1** — Modularization & hardening: extracted `Core.psm1` (git primitives) + `Merge.psm1` (the transactional engine), making the three commands thin peers on one engine (**removed the `gitsync → gitmerge` call**); began git-safety hardening (`GIT_DIR`/locating-env neutralization); upgrade-advisory fix.
-- **v5.0.0** — Latent-bug sweep: UTF-8 capture of git output (non-ASCII branch names), non-destructive fetch, `gitstatus` porcelain hygiene, display-width-aware truncation; over-engineering descoped and dead code removed.
+**v5.x — Modularization, engine unification & hardening**
+- **v5.5.0–v5.10.0** — Non-interactive git profile, in-progress-op preflight, encoding/i18n tests, modules moved into `Modules/`.
+- **v5.4.0** — Folded `max` tier into `rich` (`max` stays a compatibility alias); visual tiers are now `rich/standard/basic`.
+- **v5.1.0–v5.3.1** — Extracted `Core.psm1` + `Merge.psm1`; three commands become thin peers on one engine (removed `gitsync → gitmerge` coupling); git-safety hardening.
+- **v5.0.0** — UTF-8 capture, non-destructive fetch, porcelain hygiene, dead-code removal.
+- **v4.x** — Claude-driven hardening & open-source release: dependency-free test system, capability profile + 4-tier visual selection, git-safety hardening, bilingual README + MIT license + GitHub release.
 
-**v4.x — Claude-driven hardening & open-source release**
-- **v4.3.0** — Public release: bilingual README (Chinese default), MIT license, roadmap; published to GitHub.
-- **v4.2.0** — Git-safety hardening: fully-qualified refs (no tag/remote shadowing), `merge --abort` guard, `gitsync` result ordering & non-destructive fetch, unmerged-descendant skip.
-- **v4.1.0** — Visual/runtime: fixed the rich crash, terminal-capability detection, the `standard` UTF-8 gate, truthy suppress parsing; added the capability profile, 4-tier `max/rich/standard/basic` selection, and the upgrade advisory.
-- **v4.0.0** — Dependency-free test system: hermetic throwaway repos, a path-containment guard, a cross-runtime driver, and characterization tests.
+**v3.x — ~3 milestones (Git adoption + visual progression):** the `rich` tier took shape (emoji, Unicode box-drawing); began using Git for version control; `max` top-tier experiments.
 
-**v3.x — Visual progression & Git adoption (early retrospective)**
-- **v3.2** — `max` top-tier experiments (truecolor / terminal-escape effects).
-- **v3.1** — The `rich` tier took shape: emoji, Unicode box-drawing, per-stage colored output.
-- **v3.0** — Began using Git for version control; the visual layer evolved from plain text toward tiered rendering.
+**v2.x — Three commands & basic visuals (one-line summary):** the three-command shape emerged (`gitmerge` + `gitsync` + `gitstatus`), with basic visuals (stage headers, status lines, result summary).
 
-**v2.x — Three commands & basic visuals (retrospective)**
-- **v2.0** — The three-command shape emerged: added `gitsync`/`gitpush` alongside `gitmerge` (atomic push, later folded into `gitsync`) plus the first `gitstatus`, with basic visuals (stage headers / status lines / result summary).
-
-**v1.x — Genesis (retrospective, pre-Git)**
-- **v1.0** — The first `gitmerge`: a single script consolidating local branches through `main` (transactional temporary-worktree integration, `--ff-only` advancement).
+**v1.x — Genesis (one-line summary):** the first `gitmerge`: a single script consolidating local branches through `main` (transactional temporary-worktree integration, `--ff-only` advancement).
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE) © Leemax Li
