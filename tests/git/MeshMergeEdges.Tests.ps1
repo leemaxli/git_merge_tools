@@ -1,32 +1,33 @@
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'smoke/Commands.Smoke.Tests.ps1.helper.ps1')
 
-# v7 follow-up: lock two cross-all (mesh) edge cases the v7.2 review verified manually but left untested.
-function Test-IsAncestorSb { param($sb, $anc, $desc); return (Invoke-SandboxGit $sb.Repo @('merge-base', '--is-ancestor', $anc, $desc)).ExitCode -eq 0 }
+# v7 follow-up + dirty-current bug fix: two cross-all (mesh) edge cases.
 
-# Edge 1: the CURRENT branch itself is dirty. Mesh has no essential branch, so current is skipped
-# (unsafe state, skip-and-proceed) and the remaining safe branches still converge; current is untouched.
-Test-Case 'gitmerge cross-all: a dirty CURRENT branch is skipped; the other branches still converge' {
+# Edge 1: the CURRENT branch is dirty. The current branch is essential to a cross-all (it's the user's
+# active context, usually the one carrying the work to converge); a dirty current ABORTS the run --
+# consistent with the star hub and the 2-branch current branch. It must NOT be silently skipped while the
+# other branches "converge" into a hollow success. The abort takes precedence even when other branches
+# have legitimate divergent work to converge (the user must clean the current branch, then re-run).
+Test-Case 'gitmerge cross-all: a dirty CURRENT branch ABORTS the run; nothing changes' {
     $sb = New-GitSandbox
     try {
         $base = New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base'
-        $tWork = New-SandboxCommit -Sandbox $sb -FileName 't.txt' -Content "T`n" -Message 'main work'
         New-SandboxBranch -Sandbox $sb -Name 'branch-a' -StartPoint $base
         Invoke-SandboxGit $sb.Repo @('switch', 'branch-a') | Out-Null
-        $aWork = New-SandboxCommit -Sandbox $sb -FileName 'a.txt' -Content "A`n" -Message 'A work'
+        [void](New-SandboxCommit -Sandbox $sb -FileName 'a.txt' -Content "A`n" -Message 'A work')
         New-SandboxBranch -Sandbox $sb -Name 'branch-c' -StartPoint $base
         Invoke-SandboxGit $sb.Repo @('switch', 'branch-c') | Out-Null
-        $cWork = New-SandboxCommit -Sandbox $sb -FileName 'c.txt' -Content "C`n" -Message 'C work'
+        [void](New-SandboxCommit -Sandbox $sb -FileName 'c.txt' -Content "C`n" -Message 'C work')
         Invoke-SandboxGit $sb.Repo @('switch', 'main') | Out-Null
-        $mainBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main'
         Set-Content -LiteralPath (Join-Path $sb.Repo 'f.txt') -Value "dirty`n" -Encoding utf8   # dirty the CURRENT (main) worktree
+        $mainBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main'
+        $aBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-a'
+        $cBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-c'
 
         $ok = Invoke-ProductCommand -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'cross-all' -Sandbox $sb
-        Assert-True $ok 'cross-all should succeed by skipping the dirty current branch'
-        Assert-Equal $mainBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main') -Message 'the dirty current branch must be untouched'
-        Assert-Equal (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-a') (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-c') -Message 'the safe branches converge to one union'
-        Assert-True (Test-IsAncestorSb $sb $aWork 'refs/heads/branch-a') 'union has branch-a work'
-        Assert-True (Test-IsAncestorSb $sb $cWork 'refs/heads/branch-a') 'union has branch-c work'
-        Assert-False (Test-IsAncestorSb $sb $tWork 'refs/heads/branch-a') 'union must NOT contain the skipped current branch work'
+        Assert-False $ok 'a dirty current branch must ABORT cross-all (not hollow-succeed by skipping it)'
+        Assert-Equal $mainBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main') -Message 'current (main) unchanged on abort'
+        Assert-Equal $aBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-a') -Message 'branch-a unchanged on abort'
+        Assert-Equal $cBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-c') -Message 'branch-c unchanged on abort'
     } finally { Remove-GitSandbox $sb }
 }
 

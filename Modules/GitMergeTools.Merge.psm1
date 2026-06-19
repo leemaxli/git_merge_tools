@@ -1094,6 +1094,16 @@ function Invoke-MeshMerge {
     foreach ($B in $ordered) {
         $bWt = Find-BranchWorktree $worktrees $B
         if ($null -ne $bWt -and -not (Test-CleanWorktree $bWt)) {
+            if ($B -ceq $current) {
+                # The current branch is the user's active context and the whole point of a cross-all run.
+                # Silently skipping it (like a non-current branch) collapses the union to the other branches'
+                # shared tip and reports a hollow SUCCESS while nothing actually merges. Abort instead --
+                # consistent with the star hub and the 2-branch current branch, both of which abort here.
+                $RunState.FailureReason = "Current branch '$current' has uncommitted changes or an operation in progress; commit or stash them, then re-run gitmerge cross-all."
+                Write-Warning $RunState.FailureReason
+                Add-RunMessage -State $RunState -Level 'ERROR' -Text $RunState.FailureReason
+                return $false
+            }
             [void]$RunState.SkippedBranches.Add($B)
             Write-StatusLine -Marker '!' -Message "Skip '$B': worktree not clean." -Color Yellow
             Write-Warning "Skipping '$B': its worktree is not clean."
