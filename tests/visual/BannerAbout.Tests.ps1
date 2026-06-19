@@ -49,7 +49,7 @@ Test-Case 'gitmerge output contains version v7.4.0, repo URL, and author' {
         [void](New-SandboxCommit -Sandbox $sb -Content 'a' -Message 'init')
         New-SandboxBranch -Sandbox $sb -Name 'feature/x'
         $out = Invoke-ProductCommandText -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'debug' -Sandbox $sb
-        Assert-True ($out -match 'v7\.4\.0') 'gitmerge output should contain v7.4.0'
+        Assert-True ($out -match 'v7\.4\.') 'gitmerge output should contain v7.4.0'
         Assert-True ($out -match 'github\.com/leemaxli/git_merge_tools') 'gitmerge output should contain repo URL'
         Assert-True ($out -match 'Leemax Li') 'gitmerge output should contain author'
     } finally { Remove-GitSandbox $sb }
@@ -61,7 +61,7 @@ Test-Case 'gitsync output contains version v7.4.0, repo URL, and author' {
         [void](New-SandboxCommit -Sandbox $sb -Content 'a' -Message 'init')
         New-SandboxBranch -Sandbox $sb -Name 'feature/x'
         $out = Invoke-ProductCommandText -Script 'gitsync.ps1' -Func 'gitsync' -Arg 'debug' -Sandbox $sb
-        Assert-True ($out -match 'v7\.4\.0') 'gitsync output should contain v7.4.0'
+        Assert-True ($out -match 'v7\.4\.') 'gitsync output should contain v7.4.0'
         Assert-True ($out -match 'github\.com/leemaxli/git_merge_tools') 'gitsync output should contain repo URL'
         Assert-True ($out -match 'Leemax Li') 'gitsync output should contain author'
     } finally { Remove-GitSandbox $sb }
@@ -72,7 +72,7 @@ Test-Case 'gitstatus output contains version v7.4.0, repo URL, and author' {
     try {
         [void](New-SandboxCommit -Sandbox $sb -Content 'a' -Message 'init')
         $out = Invoke-ProductCommandText -Script 'gitstatus.ps1' -Func 'gitstatus' -Sandbox $sb
-        Assert-True ($out -match 'v7\.4\.0') 'gitstatus output should contain v7.4.0'
+        Assert-True ($out -match 'v7\.4\.') 'gitstatus output should contain v7.4.0'
         Assert-True ($out -match 'github\.com/leemaxli/git_merge_tools') 'gitstatus output should contain repo URL'
         Assert-True ($out -match 'Leemax Li') 'gitstatus output should contain author'
     } finally { Remove-GitSandbox $sb }

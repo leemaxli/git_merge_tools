@@ -298,13 +298,13 @@ function Get-RecentCommitLines {
 
 function Get-GitMergeToolsVersion {
     # Returns the current tool version string.
-    return '7.4.0'
+    return '7.4.1'
 }
 
 function Get-GitMergeToolsAbout {
     # Returns a structured object with version, repository URL, and author.
     return [pscustomobject]@{
-        Version    = 'v7.4.0'
+        Version    = 'v7.4.1'
         Repository = 'https://github.com/leemaxli/git_merge_tools'
         Author     = 'Leemax Li'
     }
