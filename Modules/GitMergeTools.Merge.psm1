@@ -39,11 +39,15 @@ function Get-WorktreeInProgressOperation {
     if ($null -eq $Worktree -or [string]::IsNullOrWhiteSpace($Worktree.Path) -or -not (Test-Path -LiteralPath $Worktree.Path)) {
         return $null
     }
+    # NB: REBASE_HEAD is deliberately NOT a marker. git writes it to point at the commit being replayed and
+    # LEAVES IT BEHIND after a rebase completes/aborts (a convenience ref, like ORIG_HEAD), so its mere
+    # presence does NOT mean a rebase is in progress. git's own in-progress test (wt-status.c) keys on the
+    # rebase-merge / rebase-apply DIRECTORY -- as do we. (MERGE_HEAD/CHERRY_PICK_HEAD/REVERT_HEAD are removed
+    # by git when their operation concludes, so those are reliable.)
     $markers = @(
         @{ Name = 'MERGE_HEAD'; Op = 'a merge' },
         @{ Name = 'CHERRY_PICK_HEAD'; Op = 'a cherry-pick' },
         @{ Name = 'REVERT_HEAD'; Op = 'a revert' },
-        @{ Name = 'REBASE_HEAD'; Op = 'a rebase' },
         @{ Name = 'rebase-merge'; Op = 'a rebase' },
         @{ Name = 'rebase-apply'; Op = 'a rebase' }
     )
