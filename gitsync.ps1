@@ -231,10 +231,10 @@ function gitsync {
         }
 
         if ($Mode -ne 'debug' -and -not [string]::IsNullOrWhiteSpace($Repository) -and -not [string]::IsNullOrWhiteSpace($MainBranch)) {
-            $recent = Get-RecentCommitLines -Repository $Repository -Branch $MainBranch
+            $recent = Get-RecentCommitLines -Repository $Repository -Branch $MainBranch -Graph
             if (@($recent).Count -gt 0) {
                 Write-Host ''
-                Write-Host "-- Recent commits on $MainBranch --" -ForegroundColor DarkGray
+                Write-Host ("Recent commits on ${MainBranch}:") -ForegroundColor DarkGray
                 foreach ($line in @($recent)) {
                     Write-Host "   $line" -ForegroundColor DarkGray
                 }

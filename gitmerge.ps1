@@ -153,7 +153,7 @@ function gitmerge {
         if ($null -ne $visual) {
             $recentLines = @()
             if (-not $State.DryRun -and -not [string]::IsNullOrWhiteSpace($State.Repository) -and -not [string]::IsNullOrWhiteSpace($State.MainBranch)) {
-                $recentLines = Get-RecentCommitLines -Repository $State.Repository -Branch $State.MainBranch
+                $recentLines = Get-RecentCommitLines -Repository $State.Repository -Branch $State.MainBranch -Graph
             }
             & $visual.WriteRunSummary -State $State -RecentLines $recentLines -Name 'gitmerge'
             if (Get-Command Write-GitMergeToolsUpgradeAdvisory -ErrorAction SilentlyContinue) {
@@ -219,10 +219,10 @@ function gitmerge {
         }
 
         if (-not $State.DryRun -and -not [string]::IsNullOrWhiteSpace($State.Repository) -and -not [string]::IsNullOrWhiteSpace($State.MainBranch)) {
-            $recent = Get-RecentCommitLines -Repository $State.Repository -Branch $State.MainBranch
+            $recent = Get-RecentCommitLines -Repository $State.Repository -Branch $State.MainBranch -Graph
             if (@($recent).Count -gt 0) {
                 Write-Host ''
-                Write-Host "-- Recent commits on $($State.MainBranch) --" -ForegroundColor DarkGray
+                Write-Host "Recent commits on $($State.MainBranch):" -ForegroundColor DarkGray
                 foreach ($line in @($recent)) {
                     Write-Host "   $line" -ForegroundColor DarkGray
                 }

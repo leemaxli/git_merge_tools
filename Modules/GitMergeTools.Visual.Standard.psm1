@@ -161,7 +161,8 @@ function New-GitMergeToolsVisualStandard {
             Write-Host ("  Workflow                  : {0}" -f ($State.Stages -join ' -> '))
         }
         if (-not $State.DryRun -and -not [string]::IsNullOrWhiteSpace($State.MainBranch) -and @($RecentLines).Count -gt 0) {
-            Write-Host ''; Write-Host "── Recent commits on $($State.MainBranch) ──" -ForegroundColor $theme.Info
+            Write-Host ''
+            Write-Host "── Recent commits on $($State.MainBranch) ──" -ForegroundColor $theme.Info
             foreach ($line in @($RecentLines)) { Write-Host "   $line" -ForegroundColor $theme.Info }
         }
         # Collected messages section.

@@ -203,7 +203,7 @@ function gitstatus {
             }
         }
 
-        $logLines = Get-RecentCommitLines -Repository $Repository -Branch $Branch -Decorate
+        $logLines = Get-RecentCommitLines -Repository $Repository -Branch $Branch -Decorate -Graph
         $mainCompare = if ($Branch -ceq $MainBranch) {
             [pscustomobject]@{ LeftOnly = 0; RightOnly = 0 }
         }

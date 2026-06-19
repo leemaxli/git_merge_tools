@@ -186,8 +186,21 @@ function New-GitMergeToolsVisualRich {
             Write-Host ("  🔗 Workflow               : {0}" -f ($State.Stages -join ' -> '))
         }
         if (-not $State.DryRun -and -not [string]::IsNullOrWhiteSpace($State.MainBranch) -and @($RecentLines).Count -gt 0) {
-            Write-Host ''; Write-Host "── Recent commits on $($State.MainBranch) ──" -ForegroundColor $theme.Info
-            foreach ($line in @($RecentLines)) { Write-Host "   $line" -ForegroundColor $theme.Info }
+            Write-Host ''
+            Write-Host "🌳 Recent commits on $($State.MainBranch)" -ForegroundColor $theme.Highlight
+            foreach ($line in @($RecentLines)) {
+                # Split the line into: leading graph-glyph run (*, |, \, /, space, _, -, .) and the remainder.
+                if ($line -match '^([*|\\/ _.`-]+)(.*)$') {
+                    $glyphs = $matches[1]
+                    $rest   = $matches[2]
+                    Write-Host '   ' -NoNewline
+                    Write-Host $glyphs -NoNewline -ForegroundColor $theme.Divider
+                    Write-Host $rest -ForegroundColor $theme.Info
+                }
+                else {
+                    Write-Host "   $line" -ForegroundColor $theme.Info
+                }
+            }
         }
         # Collected messages section.
         $messagesMembers = $State | Get-Member -Name 'Messages' -MemberType NoteProperty, Property -ErrorAction SilentlyContinue
