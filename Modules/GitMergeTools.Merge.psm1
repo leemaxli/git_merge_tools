@@ -349,6 +349,7 @@ function Invoke-TwoBranchMerge {
     # Step 4: X == current -> reminder no-op.
     if ($X -ceq $current) {
         Write-StatusLine -Marker 'i' -Message "Target '$X' is the current branch; nothing to merge." -Color DarkGray
+        Add-RunMessage -State $RunState -Level 'NOTICE' -Text "Target '$X' is the current branch; nothing to merge."
         $RunState.Result = 'SUCCESS'
         $RunState.MainBranch = $current
         $RunState.MainPublished = 'NOT REQUIRED'
@@ -420,6 +421,7 @@ function Invoke-TwoBranchMerge {
             Write-GitFailure "Merge conflict or failure merging '$X' into '$current'" $merge
             $RunState.ConflictBranch = $X
             $RunState.FailureReason = "Conflict merging '$X' into '$current'."
+            Add-RunMessage -State $RunState -Level 'WARNING' -Text "Conflict merging '$X' into '$current'; nothing was changed."
             $mergeInProgress = (Invoke-GitCommand $temporaryWorktree @('rev-parse', '--verify', '-q', 'MERGE_HEAD') -SuppressError).ExitCode -eq 0
             if ($mergeInProgress) {
                 $abort = Invoke-GitCommand $temporaryWorktree @('merge', '--abort') -MergeError
@@ -1047,6 +1049,7 @@ function Invoke-MeshMerge {
 
     if ($managed.Count -lt 2) {
         Write-StatusLine -Marker 'i' -Message 'Fewer than 2 managed branches; nothing to converge.' -Color DarkGray
+        Add-RunMessage -State $RunState -Level 'NOTICE' -Text 'Fewer than 2 managed branches; nothing to converge.'
         $RunState.Result = 'SUCCESS'
         $RunState.MainPublished = 'NOT REQUIRED'
         return $true
@@ -1094,6 +1097,7 @@ function Invoke-MeshMerge {
             [void]$RunState.SkippedBranches.Add($B)
             Write-StatusLine -Marker '!' -Message "Skip '$B': worktree not clean." -Color Yellow
             Write-Warning "Skipping '$B': its worktree is not clean."
+            Add-RunMessage -State $RunState -Level 'NOTICE' -Text "Skipped '$B': worktree not clean."
         }
         else {
             [void]$safe.Add($B)
@@ -1103,6 +1107,7 @@ function Invoke-MeshMerge {
 
     if ($safe.Count -lt 2) {
         Write-StatusLine -Marker 'i' -Message 'Fewer than 2 safe branches; nothing to converge among safe branches.' -Color Yellow
+        Add-RunMessage -State $RunState -Level 'NOTICE' -Text 'Fewer than 2 safe branches; nothing to converge.'
         $RunState.Result = 'SUCCESS'
         $RunState.MainPublished = 'NOT REQUIRED'
         return $true
@@ -1156,6 +1161,7 @@ function Invoke-MeshMerge {
                 $RunState.ConflictBranch = $B
                 $RunState.FailedBranches.Add($B)
                 $RunState.FailureReason = "Conflict merging '$B' into the mesh union; nothing was changed."
+                Add-RunMessage -State $RunState -Level 'WARNING' -Text "Conflict merging '$B' into the mesh union; nothing was changed."
                 $mergeInProgress = (Invoke-GitCommand $temporaryWorktree @('rev-parse', '--verify', '-q', 'MERGE_HEAD') -SuppressError).ExitCode -eq 0
                 if ($mergeInProgress) {
                     $abort = Invoke-GitCommand $temporaryWorktree @('merge', '--abort') -MergeError
