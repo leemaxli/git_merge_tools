@@ -287,6 +287,20 @@ function Get-RecentCommitLines {
     return @()
 }
 
+function Get-GitMergeToolsVersion {
+    # Returns the current tool version string.
+    return '7.4.0'
+}
+
+function Get-GitMergeToolsAbout {
+    # Returns a structured object with version, repository URL, and author.
+    return [pscustomobject]@{
+        Version    = 'v7.4.0'
+        Repository = 'https://github.com/leemaxli/git_merge_tools'
+        Author     = 'Leemax Li'
+    }
+}
+
 Export-ModuleMember -Function @(
     'Invoke-GitCommand',
     'Get-FirstOutputLine',
@@ -301,5 +315,7 @@ Export-ModuleMember -Function @(
     'Test-Ancestor',
     'Get-Mode',
     'Get-UniqueBranchList',
-    'Get-RecentCommitLines'
+    'Get-RecentCommitLines',
+    'Get-GitMergeToolsVersion',
+    'Get-GitMergeToolsAbout'
 )

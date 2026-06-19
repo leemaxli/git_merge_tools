@@ -101,20 +101,25 @@ function gitstatus {
 
     function Write-RunBanner {
         param([bool]$DryRun)
+        $about = Get-GitMergeToolsAbout
         if ($null -ne $visual) {
             & $visual.WriteRunBanner -DryRun:$DryRun -Name 'gitstatus'
-            return
-        }
-        $color = if ($DryRun) { 'Magenta' } else { 'Cyan' }
-        Write-Host ''
-        Write-Host '╔══════════════════════════════════════════════════════════════╗' -ForegroundColor $color
-        if ($DryRun) {
-            Write-Host '║  GITSTATUS DEBUG / DRY-RUN  Preview only                   ║' -ForegroundColor $color
         }
         else {
-            Write-Host '║  GITSTATUS  Enhanced status, log, and comparisons          ║' -ForegroundColor $color
+            $color = if ($DryRun) { 'Magenta' } else { 'Cyan' }
+            $inner = 62  # number of = in top/bottom border
+            $text = if ($DryRun) {
+                'GITSTATUS DEBUG / DRY-RUN  Preview only'
+            } else {
+                'GITSTATUS  Enhanced status, log, and comparisons'
+            }
+            Write-Host ''
+            Write-Host ('╔' + '═' * $inner + '╗') -ForegroundColor $color
+            Write-Host ('║' + ('  ' + $text).PadRight($inner) + '║') -ForegroundColor $color
+            Write-Host ('╚' + '═' * $inner + '╝') -ForegroundColor $color
         }
-        Write-Host '╚══════════════════════════════════════════════════════════════╝' -ForegroundColor $color
+        Write-Host ("  $($about.Version) · $($about.Repository) · $($about.Author)") -ForegroundColor DarkGray
+        Write-Host ''
     }
 
     function Write-Stage {

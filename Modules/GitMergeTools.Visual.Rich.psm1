@@ -78,7 +78,7 @@ function New-GitMergeToolsVisualRich {
         Write-Host '         ╚═════╝ ╚═╝   ╚═╝   ' -ForegroundColor $frameColor
         Write-Host ''
         Write-Host '╔══════════════════════════════════════════════════════════════╗' -ForegroundColor $frameColor
-        Write-Host ("║  {0}  ║" -f (& $formatFixedWidth -Text "$prefix $title" -Width 56)) -ForegroundColor $frameColor
+        Write-Host ("║  {0}  ║" -f (& $formatFixedWidth -Text "$prefix $title" -Width 58)) -ForegroundColor $frameColor
         Write-Host '╚══════════════════════════════════════════════════════════════╝' -ForegroundColor $frameColor
         Write-Host ''
     }

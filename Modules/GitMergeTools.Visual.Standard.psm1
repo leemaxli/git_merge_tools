@@ -58,7 +58,7 @@ function New-GitMergeToolsVisualStandard {
         $title = if ($DryRun) { "$($Name.ToUpperInvariant())  DEBUG / DRY-RUN  Preview only; refs unchanged" } else { "$($Name.ToUpperInvariant())  $description" }
         Write-Host ''
         Write-Host '╔══════════════════════════════════════════════════════════════╗' -ForegroundColor $frameColor
-        Write-Host ("║  {0}║" -f (& $formatFixedWidth -Text $title -Width 58)) -ForegroundColor $frameColor
+        Write-Host ("║  {0}║" -f (& $formatFixedWidth -Text $title -Width 60)) -ForegroundColor $frameColor
         Write-Host '╚══════════════════════════════════════════════════════════════╝' -ForegroundColor $frameColor
         Write-Host ''
     }

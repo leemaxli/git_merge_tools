@@ -109,20 +109,24 @@ function gitmerge {
 
     function Write-RunBanner {
         param([bool]$DryRun)
+        $about = Get-GitMergeToolsAbout
         if ($null -ne $visual) {
             & $visual.WriteRunBanner -DryRun:$DryRun -Name 'gitmerge'
-            return
-        }
-        $color = if ($DryRun) { 'Magenta' } else { 'Cyan' }
-        Write-Host ''
-        Write-Host '╔══════════════════════════════════════════════════════════════╗' -ForegroundColor $color
-        if ($DryRun) {
-            Write-Host '║  DEBUG / DRY-RUN  Transaction preview, no refs will change   ║' -ForegroundColor $color
         }
         else {
-            Write-Host '║  GITMERGE  Transactional cross-merge and synchronization     ║' -ForegroundColor $color
+            $color = if ($DryRun) { 'Magenta' } else { 'Cyan' }
+            $inner = 62  # number of = in top/bottom border
+            $text = if ($DryRun) {
+                'DEBUG / DRY-RUN  Transaction preview, no refs will change'
+            } else {
+                'GITMERGE  Transactional cross-merge and synchronization'
+            }
+            Write-Host ''
+            Write-Host ('╔' + '═' * $inner + '╗') -ForegroundColor $color
+            Write-Host ('║' + ('  ' + $text).PadRight($inner) + '║') -ForegroundColor $color
+            Write-Host ('╚' + '═' * $inner + '╝') -ForegroundColor $color
         }
-        Write-Host '╚══════════════════════════════════════════════════════════════╝' -ForegroundColor $color
+        Write-Host ("  $($about.Version) · $($about.Repository) · $($about.Author)") -ForegroundColor DarkGray
         Write-Host ''
     }
 

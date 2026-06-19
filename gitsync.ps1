@@ -119,20 +119,25 @@ function gitsync {
 
     function Write-RunBanner {
         param([bool]$DryRun)
+        $about = Get-GitMergeToolsAbout
         if ($null -ne $visual) {
             & $visual.WriteRunBanner -DryRun:$DryRun -Name 'gitsync'
-            return
-        }
-        $color = if ($DryRun) { 'Magenta' } else { 'Cyan' }
-        Write-Host ''
-        Write-Host '╔══════════════════════════════════════════════════════════════╗' -ForegroundColor $color
-        if ($DryRun) {
-            Write-Host '║  GITSYNC DEBUG / DRY-RUN  Preview only; refs unchanged      ║' -ForegroundColor $color
         }
         else {
-            Write-Host '║  GITSYNC  Transactional merge plus remote push              ║' -ForegroundColor $color
+            $color = if ($DryRun) { 'Magenta' } else { 'Cyan' }
+            $inner = 62  # number of = in top/bottom border
+            $text = if ($DryRun) {
+                'GITSYNC DEBUG / DRY-RUN  Preview only; refs unchanged'
+            } else {
+                'GITSYNC  Transactional merge plus remote push'
+            }
+            Write-Host ''
+            Write-Host ('╔' + '═' * $inner + '╗') -ForegroundColor $color
+            Write-Host ('║' + ('  ' + $text).PadRight($inner) + '║') -ForegroundColor $color
+            Write-Host ('╚' + '═' * $inner + '╝') -ForegroundColor $color
         }
-        Write-Host '╚══════════════════════════════════════════════════════════════╝' -ForegroundColor $color
+        Write-Host ("  $($about.Version) · $($about.Repository) · $($about.Author)") -ForegroundColor DarkGray
+        Write-Host ''
     }
 
     function Write-Stage {
