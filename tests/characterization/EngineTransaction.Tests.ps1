@@ -2,7 +2,8 @@
 
 # Characterization tests that LOCK the transactional merge engine's safety invariants before the P3
 # engine extraction. They capture current (correct) behavior; any P3 change that alters it turns these
-# red. Together with Safety.Tests (conflict->no-change/no-leak, dirty->refuse, clean-FF->branch-kept)
+# red. Together with Safety.Tests (conflict->no-change/no-leak, overlapping-dirty->refuse vs
+# non-overlapping-dirty->FF-with-changes-preserved [v7.5.0], clean-FF->branch-kept)
 # they cover: all-or-nothing, non-FF merge integration, caller-HEAD invariance, post-success cleanup.
 
 Test-Case 'gitmerge all (v7.1 star): conflicting spoke is skipped; clean spoke merges; no leak' {
