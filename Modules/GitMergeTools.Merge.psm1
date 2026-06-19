@@ -135,6 +135,32 @@ function Get-RemoteMergeTree {
     return Get-FirstOutputLine $result
 }
 
+function Test-WorktreeUsable {
+    # Returns $false only for UNTOUCHABLE worktree states: locked, prunable/unavailable, or mid-operation
+    # (merge / rebase / cherry-pick / revert). Mere uncommitted changes are NOT untouchable -- git merge
+    # --ff-only arbitrates them safely at apply time (preserves non-overlapping changes, refuses overlap).
+    # Use this in the engines' pre-checks instead of Test-CleanWorktree. Test-CleanWorktree (which also
+    # checks for uncommitted changes) is kept for gitsync's REMOTE PULL phase.
+    param([Parameter(Mandatory)]$Worktree)
+    if ($Worktree.Locked) {
+        $reason = if ([string]::IsNullOrWhiteSpace($Worktree.LockReason)) { '' } else { ": $($Worktree.LockReason)" }
+        Write-Warning "Worktree for '$($Worktree.Branch)' is locked$reason. Path: $($Worktree.Path)"
+        Write-Host "  If the lock is stale, run: git worktree unlock '$($Worktree.Path)'" -ForegroundColor DarkGray
+        return $false
+    }
+    if ($Worktree.Prunable -or -not (Test-Path -LiteralPath $Worktree.Path)) {
+        Write-Warning "Worktree for '$($Worktree.Branch)' is unavailable: $($Worktree.Path)"
+        return $false
+    }
+    $inProgress = Get-WorktreeInProgressOperation -Worktree $Worktree
+    if ($inProgress) {
+        Write-Warning "Affected worktree has $inProgress in progress: $($Worktree.Path)"
+        Write-Host '  Finish or abort it (e.g. git merge --abort / git rebase --abort), then retry.' -ForegroundColor DarkGray
+        return $false
+    }
+    return $true
+}
+
 function Test-CleanWorktree {
     param([Parameter(Mandatory)]$Worktree)
     if ($Worktree.Locked) {
@@ -368,18 +394,19 @@ function Invoke-TwoBranchMerge {
     $curWt = Find-BranchWorktree $worktrees $current
     $xWt = Find-BranchWorktree $worktrees $X
 
-    # Step 6: Preflight cleanliness (no main requirement; just current and X worktrees).
-    if ($null -ne $curWt -and -not (Test-CleanWorktree $curWt)) {
-        $RunState.FailureReason = "No refs were changed because the '$current' worktree is not clean."
+    # Step 6: Preflight -- only untouchable states (locked / prunable / in-progress op) block.
+    # Mere uncommitted changes are NOT blocked here; git merge --ff-only arbitrates them safely at apply.
+    if ($null -ne $curWt -and -not (Test-WorktreeUsable $curWt)) {
+        $RunState.FailureReason = "No refs were changed because the '$current' worktree is in an untouchable state (locked, unavailable, or mid-operation)."
         Write-Warning $RunState.FailureReason
         return $false
     }
-    if ($null -ne $xWt -and -not (Test-CleanWorktree $xWt)) {
-        $RunState.FailureReason = "No refs were changed because the '$X' worktree is not clean."
+    if ($null -ne $xWt -and -not (Test-WorktreeUsable $xWt)) {
+        $RunState.FailureReason = "No refs were changed because the '$X' worktree is in an untouchable state (locked, unavailable, or mid-operation)."
         Write-Warning $RunState.FailureReason
         return $false
     }
-    Write-StatusLine -Marker 'i' -Message 'Affected worktrees are clean.' -Color Green
+    Write-StatusLine -Marker 'i' -Message 'Affected worktrees are usable.' -Color Green
 
     # Step 7: Capture old tips.
     # NOTE: The #10 sub-branch skip guard is intentionally ABSENT here. In the 2-branch path,
@@ -467,22 +494,32 @@ function Invoke-TwoBranchMerge {
         Write-Stage -Title 'PUBLISH' -Subtitle "Fast-forward '$X' then '$current' to the union" -StageIcon 'PUSH'
 
         # Fast-forward X (use worktree ff-only if checked out, else CAS update-ref).
+        # No-move guard: if X is already at the union, it is untouched (including any uncommitted changes).
         $xApplyOk = $false
-        if ($null -ne $xWt) {
-            # Re-check X's cleanliness immediately before touching it (mirrors the re-check on current).
-            if (-not (Test-CleanWorktree $xWt)) {
-                $RunState.FailureReason = "The '$X' worktree changed after preflight."
+        if ($xOld -eq $unionTip) {
+            # X already at union -- untouched (branch did not need to move).
+            Write-StatusLine -Marker 'i' -Message "'$X' already at union tip; nothing to advance." -Color DarkGray
+            $xApplyOk = $true
+            $RunState.SynchronizedBranches.Add($X)
+        }
+        elseif ($null -ne $xWt) {
+            # Re-check usability immediately before touching it (in-progress guard; uncommitted changes ok).
+            if (-not (Test-WorktreeUsable $xWt)) {
+                $RunState.FailureReason = "The '$X' worktree entered an untouchable state after preflight."
                 Write-Warning $RunState.FailureReason
                 return $false
             }
             $xApply = Invoke-GitCommand $xWt.Path @('merge', '--ff-only', $unionTip) -MergeError
             $xApplyOk = ($xApply.ExitCode -eq 0)
             if (-not $xApplyOk) {
-                Write-GitFailure "Cannot fast-forward '$X' to union" $xApply
-                $RunState.FailureReason = "Cannot fast-forward '$X' to the union."
+                # git refused: uncommitted changes would be overwritten (the only reason, since union descends X).
+                Write-GitFailure "Cannot fast-forward '$X' to union (uncommitted changes would be overwritten)" $xApply
+                $RunState.FailureReason = "Cannot fast-forward '$X' to the union: uncommitted changes would be overwritten. Commit or stash '$X' changes, then retry."
+                Add-RunMessage -State $RunState -Level 'WARNING' -Text $RunState.FailureReason
                 Write-Warning $RunState.FailureReason
                 return $false
             }
+            $RunState.SynchronizedBranches.Add($X)
         }
         else {
             $xApplyOk = Move-BranchRefSafely -Repository $repository -Branch $X -ExpectedOldHash $xOld -NewHash $unionTip -Message "gitmerge: converge with '$current'"
@@ -491,27 +528,38 @@ function Invoke-TwoBranchMerge {
                 Write-Warning $RunState.FailureReason
                 return $false
             }
+            $RunState.SynchronizedBranches.Add($X)
         }
-        Write-StatusLine -Marker 'i' -Message "Fast-forwarded '$X' to the union." -Color Green
-        $RunState.SynchronizedBranches.Add($X)
+        if ($xOld -ne $unionTip) {
+            Write-StatusLine -Marker 'i' -Message "Fast-forwarded '$X' to the union." -Color Green
+        }
 
         # Fast-forward current (it is checked out in curWt or we use update-ref CAS).
+        # No-move guard: if current is already at the union, it is untouched.
         $curApplyOk = $false
-        if ($null -ne $curWt) {
-            # Re-check cleanliness before touching it.
-            if (-not (Test-CleanWorktree $curWt)) {
-                $RunState.FailureReason = "The '$current' worktree changed after preflight."
+        if ($curOld -eq $unionTip) {
+            # current already at union -- untouched (branch did not need to move, dirty changes preserved).
+            Write-StatusLine -Marker 'i' -Message "'$current' already at union tip; nothing to advance." -Color DarkGray
+            $curApplyOk = $true
+            $RunState.IntegratedBranches.Add($current)
+        }
+        elseif ($null -ne $curWt) {
+            # Re-check usability before touching it (in-progress guard; uncommitted changes ok).
+            if (-not (Test-WorktreeUsable $curWt)) {
+                $RunState.FailureReason = "The '$current' worktree entered an untouchable state after preflight."
                 Write-Warning $RunState.FailureReason
                 return $false
             }
             $curApply = Invoke-GitCommand $curWt.Path @('merge', '--ff-only', $unionTip) -MergeError
             $curApplyOk = ($curApply.ExitCode -eq 0)
             if (-not $curApplyOk) {
-                Write-GitFailure "Cannot fast-forward '$current' to union" $curApply
-                $RunState.FailureReason = "Cannot fast-forward '$current' to the union."
+                Write-GitFailure "Cannot fast-forward '$current' to union (uncommitted changes would be overwritten)" $curApply
+                $RunState.FailureReason = "Cannot fast-forward '$current' to the union: uncommitted changes would be overwritten. Commit or stash '$current' changes, then retry."
+                Add-RunMessage -State $RunState -Level 'WARNING' -Text $RunState.FailureReason
                 Write-Warning $RunState.FailureReason
                 return $false
             }
+            $RunState.IntegratedBranches.Add($current)
         }
         else {
             $curApplyOk = Move-BranchRefSafely -Repository $repository -Branch $current -ExpectedOldHash $curOld -NewHash $unionTip -Message "gitmerge: converge with '$X'"
@@ -520,9 +568,11 @@ function Invoke-TwoBranchMerge {
                 Write-Warning $RunState.FailureReason
                 return $false
             }
+            $RunState.IntegratedBranches.Add($current)
         }
-        Write-StatusLine -Marker 'i' -Message "Fast-forwarded '$current' to the union." -Color Green
-        $RunState.IntegratedBranches.Add($current)
+        if ($curOld -ne $unionTip) {
+            Write-StatusLine -Marker 'i' -Message "Fast-forwarded '$current' to the union." -Color Green
+        }
 
         # Step 13: Record success.
         $RunState.Result = 'SUCCESS'
@@ -677,13 +727,14 @@ function Invoke-StarMerge {
     $RunState.WorktreeCount = $worktrees.Count
     $curWt = Find-BranchWorktree $worktrees $T
 
-    # Hub dirty => abort entire run (hub failure is not skip-and-proceed).
-    if ($null -ne $curWt -and -not (Test-CleanWorktree $curWt)) {
-        $RunState.FailureReason = "No refs were changed because the '$T' hub worktree is not clean."
+    # Hub in-progress/locked/unavailable => abort entire run (hub failure is not skip-and-proceed).
+    # Mere uncommitted changes on the hub are NOT pre-blocked; git merge --ff-only arbitrates at apply.
+    if ($null -ne $curWt -and -not (Test-WorktreeUsable $curWt)) {
+        $RunState.FailureReason = "No refs were changed because the '$T' hub worktree is in an untouchable state (locked, unavailable, or mid-operation)."
         Write-Warning $RunState.FailureReason
         return $false
     }
-    Write-StatusLine -Marker 'i' -Message "Hub worktree clean." -Color Green
+    Write-StatusLine -Marker 'i' -Message "Hub worktree usable." -Color Green
 
     # Step 4: Capture originalT tip (never changes during this run's logic).
     $originalT = Get-RefHash $repository "refs/heads/$T"
@@ -695,15 +746,17 @@ function Invoke-StarMerge {
     Write-StatusLine -Marker 'i' -Message "Hub original tip: $($originalT.Substring(0,8))..." -Color Green
 
     # Step 5: PASS 1 -- classify spokes (read-only, mutate nothing).
-    Write-Stage -Title 'CLASSIFY SPOKES' -Subtitle 'Identify clean spokes vs. skip (dirty worktree / conflicts with hub)' -StageIcon 'SCAN'
+    # Skip only spokes in UNTOUCHABLE states (locked/prunable/in-progress); mere uncommitted changes
+    # are NOT a skip reason -- git merge --ff-only / CAS arbitrates them safely at apply.
+    Write-Stage -Title 'CLASSIFY SPOKES' -Subtitle 'Identify usable spokes vs. skip (untouchable worktree / conflicts with hub)' -StageIcon 'SCAN'
     $candidates = [System.Collections.Generic.List[object]]::new()
     foreach ($B in $others) {
         $bWt = Find-BranchWorktree $worktrees $B
-        if ($null -ne $bWt -and -not (Test-CleanWorktree $bWt)) {
+        if ($null -ne $bWt -and -not (Test-WorktreeUsable $bWt)) {
             [void]$RunState.SkippedBranches.Add($B)
-            Write-StatusLine -Marker '!' -Message "Skip '$B': worktree not clean." -Color Yellow
-            Write-Warning "Skipping '$B': its worktree is not clean."
-            Add-RunMessage -State $RunState -Level 'NOTICE' -Text "Skipped '$B': worktree not clean."
+            Write-StatusLine -Marker '!' -Message "Skip '$B': worktree is in an untouchable state (locked, unavailable, or mid-operation)." -Color Yellow
+            Write-Warning "Skipping '$B': its worktree is in an untouchable state."
+            Add-RunMessage -State $RunState -Level 'NOTICE' -Text "Skipped '$B': worktree in untouchable state."
             continue
         }
         # Probe merge of originalT + B in-memory (no worktree, no ref change).
@@ -808,23 +861,26 @@ function Invoke-StarMerge {
         }
 
         # 7a: Advance hub T to hubUnion.
+        # No-move guard: if hub is already at the union, it is untouched (including any uncommitted changes).
         if ($hubUnion -eq $originalT) {
-            Write-StatusLine -Marker 'i' -Message "Hub already current; nothing absorbed." -Color DarkGray
+            Write-StatusLine -Marker 'i' -Message "Hub already at union; nothing absorbed." -Color DarkGray
         }
         else {
             $hubAdvanceOk = $false
             if ($null -ne $curWt) {
-                # Re-check cleanliness immediately before touching it.
-                if (-not (Test-CleanWorktree $curWt)) {
-                    $RunState.FailureReason = "Hub '$T' worktree changed after preflight."
+                # Re-check usability immediately before touching it (in-progress guard; uncommitted changes ok).
+                if (-not (Test-WorktreeUsable $curWt)) {
+                    $RunState.FailureReason = "Hub '$T' worktree entered an untouchable state after preflight."
                     Write-Warning $RunState.FailureReason
                     return $false
                 }
                 $hubApply = Invoke-GitCommand $curWt.Path @('merge', '--ff-only', $hubUnion) -MergeError
                 $hubAdvanceOk = ($hubApply.ExitCode -eq 0)
                 if (-not $hubAdvanceOk) {
-                    Write-GitFailure "Cannot fast-forward hub '$T' to union" $hubApply
-                    $RunState.FailureReason = "Cannot fast-forward hub '$T' to the union."
+                    # git refused: uncommitted changes on hub would be overwritten; hub is essential -> abort.
+                    Write-GitFailure "Cannot fast-forward hub '$T' to union (uncommitted changes would be overwritten)" $hubApply
+                    $RunState.FailureReason = "Cannot fast-forward hub '$T' to the union: uncommitted changes would be overwritten. Commit or stash '$T' changes, then retry."
+                    Add-RunMessage -State $RunState -Level 'WARNING' -Text $RunState.FailureReason
                     Write-Warning $RunState.FailureReason
                     return $false
                 }
@@ -857,14 +913,22 @@ function Invoke-StarMerge {
             if (Test-Ancestor -Repository $repository -Ancestor "refs/heads/$B" -Descendant $originalT) {
                 $ffOk = $false
                 if ($null -ne $c.Worktree) {
-                    if (-not (Test-CleanWorktree $c.Worktree)) {
-                        Write-StatusLine -Marker '!' -Message "Skip reverse-merge for '$B': worktree not clean (post-pass1 change)." -Color Yellow
-                        Write-Warning "Skipping reverse merge for '$B': worktree changed after Pass 1."
+                    if (-not (Test-WorktreeUsable $c.Worktree)) {
+                        Write-StatusLine -Marker '!' -Message "Skip reverse-merge for '$B': worktree in untouchable state (post-pass1 change)." -Color Yellow
+                        Write-Warning "Skipping reverse merge for '$B': worktree entered untouchable state after Pass 1."
                         [void]$RunState.SkippedBranches.Add($B)
                         continue
                     }
                     $ffApply = Invoke-GitCommand $c.Worktree.Path @('merge', '--ff-only', $originalT) -MergeError
                     $ffOk = ($ffApply.ExitCode -eq 0)
+                    if (-not $ffOk) {
+                        # git refused: uncommitted changes on spoke B would be overwritten; skip-and-proceed.
+                        Write-StatusLine -Marker '!' -Message "Skip '$B': uncommitted changes would be overwritten by reverse-merge; commit or stash '$B' to include it." -Color Yellow
+                        Write-Warning "Skipping '$B': uncommitted changes would be overwritten; commit or stash them to include this spoke."
+                        Add-RunMessage -State $RunState -Level 'WARNING' -Text "Skipped '$B': uncommitted changes would be overwritten by the reverse-merge; commit or stash '$B' to include it."
+                        [void]$RunState.SkippedBranches.Add($B)
+                        continue
+                    }
                 }
                 else {
                     $ffOk = Move-BranchRefSafely -Repository $repository -Branch $B -ExpectedOldHash $bOld -NewHash $originalT -Message "gitmerge: star -- fast-forward spoke '$B' to hub original"
@@ -885,21 +949,22 @@ function Invoke-StarMerge {
             # commit-tree: parents = bOld (spoke's old tip), originalT. The result descends bOld => CAS ok.
             if ($null -ne $c.Worktree) {
                 # Spoke is checked out: do a real merge in its worktree.
-                if (-not (Test-CleanWorktree $c.Worktree)) {
-                    Write-StatusLine -Marker '!' -Message "Skip reverse-merge for '$B': worktree not clean (post-pass1 change)." -Color Yellow
-                    Write-Warning "Skipping reverse merge for '$B': worktree changed after Pass 1."
+                if (-not (Test-WorktreeUsable $c.Worktree)) {
+                    Write-StatusLine -Marker '!' -Message "Skip reverse-merge for '$B': worktree in untouchable state (post-pass1 change)." -Color Yellow
+                    Write-Warning "Skipping reverse merge for '$B': worktree entered untouchable state after Pass 1."
                     [void]$RunState.SkippedBranches.Add($B)
                     continue
                 }
                 $wMerge = Invoke-GitCommand $c.Worktree.Path @('merge', '--no-edit', $originalT) -MergeError
                 if ($wMerge.ExitCode -ne 0) {
-                    # Surprise conflict (should not happen after clean merge-tree, but guard anyway).
+                    # Surprise conflict or uncommitted-change refusal -- git refused the merge (skip-and-proceed).
                     $mergeInProgress = (Invoke-GitCommand $c.Worktree.Path @('rev-parse', '--verify', '-q', 'MERGE_HEAD') -SuppressError).ExitCode -eq 0
                     if ($mergeInProgress) {
                         [void](Invoke-GitCommand $c.Worktree.Path @('merge', '--abort') -MergeError)
                     }
-                    Write-StatusLine -Marker '!' -Message "Skip '$B': surprise conflict during worktree reverse merge." -Color Yellow
-                    Write-Warning "Skipping '$B': surprise conflict during reverse merge in its worktree."
+                    Write-StatusLine -Marker '!' -Message "Skip '$B': git refused reverse merge (conflict or uncommitted changes would be overwritten); commit or stash '$B' to include it." -Color Yellow
+                    Write-Warning "Skipping '$B': git refused the reverse merge. If uncommitted changes exist, commit or stash them to include this spoke."
+                    Add-RunMessage -State $RunState -Level 'WARNING' -Text "Skipped '$B': git refused the reverse-merge; commit or stash '$B' to include it."
                     [void]$RunState.SkippedBranches.Add($B)
                     continue
                 }
@@ -1088,26 +1153,26 @@ function Invoke-MeshMerge {
     $worktrees = @($worktrees)
     $RunState.WorktreeCount = $worktrees.Count
 
-    # Step 3: PASS 0 -- classify branches (unsafe STATE -> skip; current-first order preserved).
-    Write-Stage -Title 'CLASSIFY' -Subtitle 'Identify safe branches vs. skip (dirty/locked worktree)' -StageIcon 'SCAN'
+    # Step 3: PASS 0 -- classify branches (UNTOUCHABLE STATE -> skip/abort; mere uncommitted changes ok).
+    # Untouchable = locked / prunable / in-progress op (merge/rebase/cherry-pick/revert).
+    # Uncommitted changes alone are NOT a skip reason; git merge --ff-only / CAS arbitrate at apply.
+    # In-progress CURRENT worktree -> abort (genuinely can't act as base); merely dirty current -> proceed.
+    Write-Stage -Title 'CLASSIFY' -Subtitle 'Identify branches vs. skip (untouchable worktree state)' -StageIcon 'SCAN'
     $safe = [System.Collections.Generic.List[string]]::new()
     foreach ($B in $ordered) {
         $bWt = Find-BranchWorktree $worktrees $B
-        if ($null -ne $bWt -and -not (Test-CleanWorktree $bWt)) {
+        if ($null -ne $bWt -and -not (Test-WorktreeUsable $bWt)) {
             if ($B -ceq $current) {
-                # The current branch is the user's active context and the whole point of a cross-all run.
-                # Silently skipping it (like a non-current branch) collapses the union to the other branches'
-                # shared tip and reports a hollow SUCCESS while nothing actually merges. Abort instead --
-                # consistent with the star hub and the 2-branch current branch, both of which abort here.
-                $RunState.FailureReason = "Current branch '$current' has uncommitted changes or an operation in progress; commit or stash them, then re-run gitmerge cross-all."
+                # Current branch worktree is in-progress / locked / unavailable: genuinely can't act.
+                $RunState.FailureReason = "Current branch '$current' worktree is in an untouchable state (locked, unavailable, or mid-operation); finish or abort it (e.g. git merge --abort), then re-run gitmerge cross-all."
                 Write-Warning $RunState.FailureReason
                 Add-RunMessage -State $RunState -Level 'ERROR' -Text $RunState.FailureReason
                 return $false
             }
             [void]$RunState.SkippedBranches.Add($B)
-            Write-StatusLine -Marker '!' -Message "Skip '$B': worktree not clean." -Color Yellow
-            Write-Warning "Skipping '$B': its worktree is not clean."
-            Add-RunMessage -State $RunState -Level 'NOTICE' -Text "Skipped '$B': worktree not clean."
+            Write-StatusLine -Marker '!' -Message "Skip '$B': worktree in untouchable state (locked, unavailable, or mid-operation)." -Color Yellow
+            Write-Warning "Skipping '$B': its worktree is in an untouchable state."
+            Add-RunMessage -State $RunState -Level 'NOTICE' -Text "Skipped '$B': worktree in untouchable state."
         }
         else {
             [void]$safe.Add($B)
@@ -1245,19 +1310,26 @@ function Invoke-MeshMerge {
             $bWt = Find-BranchWorktree $worktrees $B
             $applyOk = $false
             if ($null -ne $bWt) {
-                # Branch is checked out in a worktree: re-check cleanliness, then merge --ff-only.
-                if (-not (Test-CleanWorktree $bWt)) {
-                    $RunState.FailureReason = "The '$B' worktree changed after preflight (concurrency)."
-                    Write-Warning $RunState.FailureReason
-                    return $false
+                # Branch is checked out: re-check usability (in-progress guard), then merge --ff-only.
+                # Uncommitted changes are NOT re-checked; git arbitrates them:
+                #   - non-overlapping -> FF succeeds, changes preserved
+                #   - overlapping -> git refuses (exit non-zero), skip-and-proceed (no data loss)
+                if (-not (Test-WorktreeUsable $bWt)) {
+                    # In-progress / locked / unavailable appeared after classify: skip-and-proceed.
+                    Write-StatusLine -Marker '!' -Message "Skip '$B': worktree entered untouchable state after classify (concurrency)." -Color Yellow
+                    Write-Warning "Skipping '$B': worktree entered an untouchable state after classify."
+                    [void]$RunState.SkippedBranches.Add($B)
+                    continue
                 }
                 $ffApply = Invoke-GitCommand $bWt.Path @('merge', '--ff-only', $unionTip) -MergeError
                 $applyOk = ($ffApply.ExitCode -eq 0)
                 if (-not $applyOk) {
-                    Write-GitFailure "Cannot fast-forward '$B' to union tip (checked-out worktree)" $ffApply
-                    $RunState.FailureReason = "Cannot fast-forward '$B' to the union (worktree FF failed)."
-                    Write-Warning $RunState.FailureReason
-                    return $false
+                    # git refused: uncommitted changes would be overwritten -> skip-and-proceed (no data loss).
+                    Write-StatusLine -Marker '!' -Message "Skip '$B': uncommitted changes would be overwritten; commit or stash '$B' to include it." -Color Yellow
+                    Write-Warning "Skipping '$B': uncommitted changes would be overwritten by the fast-forward. Commit or stash them to include this branch."
+                    Add-RunMessage -State $RunState -Level 'WARNING' -Text "Skipped '$B': uncommitted changes would be overwritten; commit or stash '$B' to include it."
+                    [void]$RunState.SkippedBranches.Add($B)
+                    continue
                 }
             }
             else {
@@ -1329,6 +1401,7 @@ Export-ModuleMember -Function @(
     'Get-RemoteBranchSyncState',
     'Get-RemoteMergeTree',
     'Move-BranchRefSafely',
+    'Test-WorktreeUsable',
     'Test-CleanWorktree',
     'Test-TemporaryWorktreeForCleanup',
     'Invoke-TemporaryCleanup',

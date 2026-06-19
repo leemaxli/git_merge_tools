@@ -52,7 +52,8 @@ Test-Case 'gitmerge cross-all: a conflict aborts the whole run (fail-fast); noth
     } finally { Remove-GitSandbox $sb }
 }
 
-Test-Case 'gitmerge cross-all: an unsafe (dirty) branch is skipped; the rest converge' {
+# v7.5.0: NON-overlapping dirty change -> branch converges fine (dirty edit preserved).
+Test-Case 'gitmerge cross-all: a non-overlapping dirty branch converges; dirty edit preserved' {
     $sb = New-GitSandbox
     try {
         $base = New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base'
@@ -66,15 +67,51 @@ Test-Case 'gitmerge cross-all: an unsafe (dirty) branch is skipped; the rest con
         Invoke-SandboxGit $sb.Repo @('switch','main') | Out-Null
         $wtD = Join-Path $sb.Root 'wt-dirty'
         Invoke-SandboxGit $sb.Repo @('worktree','add', $wtD, 'branch-dirty') | Out-Null
+        # dirty on d.txt (NON-overlapping: the FF of branch-dirty to union adds t.txt and clean.txt, not d.txt)
         Set-Content -LiteralPath (Join-Path $wtD 'd.txt') -Value "uncommitted`n" -Encoding utf8
         $dirtyBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-dirty'
 
         $ok = Invoke-ProductCommand -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'cross-all' -Sandbox $sb
-        Assert-True $ok 'cross-all skips the unsafe branch and converges the rest'
-        Assert-Equal (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main') (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-clean') -Message 'safe branches converge'
+        Assert-True $ok 'cross-all succeeds (non-overlapping dirty branch is not skipped)'
+        # All branches converge to the same union
+        Assert-Equal (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main') (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-clean') -Message 'main and branch-clean converge'
+        Assert-Equal (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main') (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-dirty') -Message 'branch-dirty also converges (non-overlapping dirty)'
+        Assert-True (Test-IsAncestorSb $sb $dirtyWork 'refs/heads/main') 'union contains the dirty branch work (it was not skipped)'
+        # dirty edit preserved in the worktree
+        $content = Get-Content -LiteralPath (Join-Path $wtD 'd.txt') -Raw
+        Assert-True ($content -match 'uncommitted') 'uncommitted dirty edit must be preserved after non-overlapping FF'
+        Invoke-SandboxGit $sb.Repo @('worktree','remove','--force', $wtD) | Out-Null
+    } finally { Remove-GitSandbox $sb }
+}
+
+# v7.5.0: OVERLAPPING dirty change -> git refuses FF at apply -> branch SKIPPED (skip-and-proceed).
+# Setup: branch-dirty at base; union adds shared.txt (from branch-clean). wt-dirty has untracked shared.txt.
+Test-Case 'gitmerge cross-all: an overlapping dirty branch is skipped at apply; the rest converge' {
+    $sb = New-GitSandbox
+    try {
+        $base = New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base'
+        # branch-clean at base, adds shared.txt
+        New-SandboxBranch -Sandbox $sb -Name 'branch-clean' -StartPoint $base
+        Invoke-SandboxGit $sb.Repo @('switch','branch-clean') | Out-Null
+        $cleanWork = New-SandboxCommit -Sandbox $sb -FileName 'shared.txt' -Content "shared`n" -Message 'adds shared'
+        # branch-dirty at base (no unique commits)
+        New-SandboxBranch -Sandbox $sb -Name 'branch-dirty' -StartPoint $base
+        Invoke-SandboxGit $sb.Repo @('switch','main') | Out-Null
+        $wtD = Join-Path $sb.Root 'wt-dirty'
+        Invoke-SandboxGit $sb.Repo @('worktree','add', $wtD, 'branch-dirty') | Out-Null
+        # untracked shared.txt in wt-dirty -> FF would introduce tracked shared.txt -> git refuses
+        Set-Content -LiteralPath (Join-Path $wtD 'shared.txt') -Value "wip`n" -Encoding utf8
+        $dirtyBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-dirty'
+
+        $ok = Invoke-ProductCommand -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'cross-all' -Sandbox $sb
+        Assert-True $ok 'cross-all must succeed (skip-and-proceed past overlapping dirty branch)'
+        # branch-dirty skipped; ref unchanged; wip preserved
+        Assert-Equal $dirtyBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-dirty') -Message 'skipped branch-dirty ref unchanged'
+        $wip = Get-Content -LiteralPath (Join-Path $wtD 'shared.txt') -Raw
+        Assert-True ($wip -match 'wip') 'overlapping wip must be preserved (not overwritten)'
+        # main and branch-clean converged (union includes shared.txt)
         Assert-True (Test-IsAncestorSb $sb $cleanWork 'refs/heads/main') 'union has the clean branch work'
-        Assert-False (Test-IsAncestorSb $sb $dirtyWork 'refs/heads/main') 'union must NOT contain the skipped dirty branch'
-        Assert-Equal $dirtyBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-dirty') -Message 'skipped dirty branch untouched'
+        Assert-Equal (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main') (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-clean') -Message 'main and branch-clean converge'
         Invoke-SandboxGit $sb.Repo @('worktree','remove','--force', $wtD) | Out-Null
     } finally { Remove-GitSandbox $sb }
 }

@@ -27,7 +27,13 @@ Test-Case 'merge conflict leaves main UNCHANGED, target branch intact, and no te
     } finally { Remove-GitSandbox $sb }
 }
 
-Test-Case 'a dirty checked-out worktree makes gitmerge refuse without changing refs' {
+# v7.5.0: Uncommitted changes on the checked-out worktree are NOT a pre-block.
+# git merge --ff-only is the data-safety arbiter:
+#   (i) NON-OVERLAPPING dirty change -> FF succeeds; the dirty edit is preserved.
+#   (ii) OVERLAPPING dirty change    -> FF refuses (exit non-zero); nothing is changed.
+
+Test-Case 'gitmerge succeeds when main has NON-OVERLAPPING dirty change; dirty edit preserved' {
+    # main is dirty on f.txt; feature/x adds g.txt (no overlap). FF succeeds; f.txt edit preserved.
     $sb = New-GitSandbox
     try {
         [void](New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base')
@@ -35,12 +41,42 @@ Test-Case 'a dirty checked-out worktree makes gitmerge refuse without changing r
         Invoke-SandboxGit $sb.Repo @('switch', 'feature/x') | Out-Null
         [void](New-SandboxCommit -Sandbox $sb -FileName 'g.txt' -Content "ahead`n" -Message 'ahead')
         Invoke-SandboxGit $sb.Repo @('switch', 'main') | Out-Null
-        Set-Content -LiteralPath (Join-Path $sb.Repo 'f.txt') -Value "dirty`n" -Encoding utf8  # uncommitted change on main worktree
+        # Dirty main on f.txt -- feature/x never touches f.txt, so the FF is non-overlapping
+        Set-Content -LiteralPath (Join-Path $sb.Repo 'f.txt') -Value "dirty-nonoverlap`n" -Encoding utf8
 
         $mainBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main'
         $ok = Invoke-ProductCommand -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'feature/x' -Sandbox $sb
-        Assert-False $ok 'gitmerge must refuse when an affected worktree is dirty'
-        Assert-Equal $mainBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main') -Message 'main moved despite dirty worktree'
+        Assert-True $ok 'gitmerge must SUCCEED when dirty change is non-overlapping with the FF'
+        # main must have moved (FF succeeded)
+        Assert-True ((Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main') -ne $mainBefore) 'main must advance (FF succeeded)'
+        # uncommitted edit on f.txt must be preserved
+        $content = Get-Content -LiteralPath (Join-Path $sb.Repo 'f.txt') -Raw
+        Assert-True ($content -match 'dirty-nonoverlap') 'uncommitted edit on f.txt must be preserved after non-overlapping FF'
+    } finally { Remove-GitSandbox $sb }
+}
+
+Test-Case 'gitmerge refuses when main has OVERLAPPING dirty change; nothing changed (data protected)' {
+    # main is dirty on f.txt; feature/x also changes f.txt -> FF would overwrite the uncommitted edit.
+    # git refuses; main ref unchanged; dirty edit preserved.
+    $sb = New-GitSandbox
+    try {
+        [void](New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base')
+        New-SandboxBranch -Sandbox $sb -Name 'feature/x'
+        Invoke-SandboxGit $sb.Repo @('switch', 'feature/x') | Out-Null
+        [void](New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "feature-change`n" -Message 'feature edits f')
+        Invoke-SandboxGit $sb.Repo @('switch', 'main') | Out-Null
+        # Dirty main on the SAME f.txt that feature/x changed (overlapping)
+        Set-Content -LiteralPath (Join-Path $sb.Repo 'f.txt') -Value "dirty-overlap`n" -Encoding utf8
+
+        $mainBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main'
+        $featBefore = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/feature/x'
+        $ok = Invoke-ProductCommand -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'feature/x' -Sandbox $sb
+        Assert-False $ok 'gitmerge must refuse when dirty change is overlapping with the FF (data protection)'
+        Assert-Equal $mainBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/main') -Message 'main must be unchanged when FF is refused'
+        Assert-Equal $featBefore (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/feature/x') -Message 'feature/x must be unchanged'
+        # uncommitted dirty edit must still be there
+        $content = Get-Content -LiteralPath (Join-Path $sb.Repo 'f.txt') -Raw
+        Assert-True ($content -match 'dirty-overlap') 'uncommitted dirty edit must be preserved (not overwritten)'
     } finally { Remove-GitSandbox $sb }
 }
 

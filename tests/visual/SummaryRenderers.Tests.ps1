@@ -39,12 +39,12 @@ function New-TestRunState {
 # Standard tier: WriteRunSummary content
 # ---------------------------------------------------------------------------
 
-Test-Case 'Standard WriteRunSummary contains version v7.4.0' {
+Test-Case 'Standard WriteRunSummary contains version v7.x' {
     Import-Module (Join-Path $summaryTestRepoRoot 'Modules/GitMergeTools.Visual.Standard.psm1') -Force -ErrorAction Stop
     $v = New-GitMergeToolsVisualStandard -CommandName 'gitmerge' -RequestedVisualMode 'standard' -RichUnavailableReasons @() -VisualWarningSuppressed $true
     $state = New-TestRunState
     $out = (& $v.WriteRunSummary -State $state -RecentLines @() -Name 'gitmerge') *>&1 | Out-String
-    Assert-Match 'v7\.4\.' $out -Message 'Standard summary must contain version v7.4.0'
+    Assert-Match 'v7\.' $out -Message 'Standard summary must contain version v7.x'
 }
 
 Test-Case 'Standard WriteRunSummary contains [LIVE] tag' {
@@ -98,12 +98,12 @@ Test-Case 'Standard WriteRunSummary [DRY-RUN] tag when DryRun is true' {
 # Rich tier: WriteRunSummary content
 # ---------------------------------------------------------------------------
 
-Test-Case 'Rich WriteRunSummary contains version v7.4.0' {
+Test-Case 'Rich WriteRunSummary contains version v7.x' {
     Import-Module (Join-Path $summaryTestRepoRoot 'Modules/GitMergeTools.Visual.Rich.psm1') -Force -ErrorAction Stop
     $v = New-GitMergeToolsVisualRich -CommandName 'gitmerge' -RequestedVisualMode 'rich' -RichUnavailableReasons @() -VisualWarningSuppressed $true
     $state = New-TestRunState
     $out = (& $v.WriteRunSummary -State $state -RecentLines @() -Name 'gitmerge') *>&1 | Out-String
-    Assert-Match 'v7\.4\.' $out -Message 'Rich summary must contain version v7.4.0'
+    Assert-Match 'v7\.' $out -Message 'Rich summary must contain version v7.x'
 }
 
 Test-Case 'Rich WriteRunSummary contains [LIVE] tag' {

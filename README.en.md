@@ -2,7 +2,7 @@
 
 [:cn: 简体中文](README.md) · :us: **English**
 
-![version](https://img.shields.io/badge/version-v7.4.1-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+![version](https://img.shields.io/badge/version-v7.5.0-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **Safe, transactional Git branch consolidation** — three cross-platform PowerShell commands with an auto-degrading, capability-aware visual layer.
 
@@ -184,11 +184,12 @@ Every run displays:
 
 ## Version history
 
-> Current version: **v7.4.1**. Early v1–v3 predate Git tracking and are a summarized retrospective; from v4 on, the history follows the Git commit log.
+> Current version: **v7.5.0**. Early v1–v3 predate Git tracking and are a summarized retrospective; from v4 on, the history follows the Git commit log.
 >
 > **History-trimming rule:** the current major lists every sub-version; each older major keeps 3–6 milestone sub-versions (fewer the older); majors more than 5 back get a single one-line summary.
 
 **v7.x — Topology redefinition: star / mesh, de-main-centered (current)**
+- **v7.5.0** — Fix: uncommitted changes **no longer pre-block** merge operations. Engines now only refuse worktrees in genuinely untouchable states (locked / unavailable / mid-operation: merge, rebase, cherry-pick, or revert); plain dirty worktrees are handed to `git merge --ff-only` at apply time — non-overlapping changes fast-forward successfully (changes preserved), overlapping changes cause git to refuse (no data loss). A branch that does not need to move (already at the union tip) is left entirely untouched, including its uncommitted changes. New exported `Test-WorktreeUsable` helper.
 - **v7.4.1** — Fix: `gitmerge cross-all` now **aborts with a clear message** when the current branch's worktree is dirty (commit or stash first), instead of silently skipping the current branch and reporting a hollow "converged" success that merged nothing — the current branch is essential to a cross-all, consistent with the star hub and the 2-branch current branch.
 - **v7.4** — UX & quality: run banner shows version, repo URL, and author in aligned box format; unified summary header (version + `[LIVE]`/`[DRY-RUN]`) across all three commands; summary now shows the invocation parameter, a compact workflow chain, and a consolidated notices/warnings section; richer recent-log with a commit-chain graph and tier-aware color/emoji; plus the dead through-main engine removed and shared helpers extracted.
 - **v7.3** — `gitsync` adopts the new topologies + **per-branch remote sync**: each mode (2-branch / all / cross-all) = the matching `gitmerge` topology, wrapped with a safe pull of every involved `origin/<branch>` before, and a per-branch single-ref ordinary push of each converged branch's own `origin/<branch>` after (skip-on-reject, never forced) — replacing the old "through-main + one atomic push" model. An unsafe `main` or star hub aborts.

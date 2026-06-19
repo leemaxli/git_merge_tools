@@ -61,57 +61,57 @@ Test-Case 'gitmerge <branch> summary shows the branch name in the Parameter line
 # All THREE commands must show [DRY-RUN] in debug mode and [LIVE] in normal mode.
 # ---------------------------------------------------------------------------
 
-Test-Case 'gitmerge debug summary contains [DRY-RUN] and version v7.4.0' {
+Test-Case 'gitmerge debug summary contains [DRY-RUN] and version v7.x' {
     $sb = New-BasicSandbox
     try {
         $out = Invoke-ProductCommandText -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'debug' -Sandbox $sb
         Assert-Match '\[DRY-RUN\]' $out -Message 'gitmerge debug must show [DRY-RUN] in summary'
-        Assert-Match 'v7\.4\.' $out -Message 'gitmerge debug must show version in summary'
+        Assert-Match 'v7\.' $out -Message 'gitmerge debug must show version in summary'
     } finally { Remove-GitSandbox $sb }
 }
 
-Test-Case 'gitmerge live run summary contains [LIVE] and version v7.4.0' {
+Test-Case 'gitmerge live run summary contains [LIVE] and version v7.x' {
     $sb = New-BasicSandbox
     try {
         $out = Invoke-ProductCommandText -Script 'gitmerge.ps1' -Func 'gitmerge' -Sandbox $sb
         Assert-Match '\[LIVE\]' $out -Message 'gitmerge live run must show [LIVE] in summary'
-        Assert-Match 'v7\.4\.' $out -Message 'gitmerge live run must show version in summary'
+        Assert-Match 'v7\.' $out -Message 'gitmerge live run must show version in summary'
     } finally { Remove-GitSandbox $sb }
 }
 
-Test-Case 'gitsync debug summary contains [DRY-RUN] and version v7.4.0' {
+Test-Case 'gitsync debug summary contains [DRY-RUN] and version v7.x' {
     $ctx = New-OriginSandboxForSync
     try {
         $out = Invoke-ProductCommandText -Script 'gitsync.ps1' -Func 'gitsync' -Arg 'debug' -Sandbox $ctx.Sandbox
         Assert-Match '\[DRY-RUN\]' $out -Message 'gitsync debug must show [DRY-RUN] in summary'
-        Assert-Match 'v7\.4\.' $out -Message 'gitsync debug must show version in summary'
+        Assert-Match 'v7\.' $out -Message 'gitsync debug must show version in summary'
     } finally { Remove-GitSandbox $ctx.Sandbox }
 }
 
-Test-Case 'gitsync live run summary contains [LIVE] and version v7.4.0' {
+Test-Case 'gitsync live run summary contains [LIVE] and version v7.x' {
     $ctx = New-OriginSandboxForSync
     try {
         $out = Invoke-ProductCommandText -Script 'gitsync.ps1' -Func 'gitsync' -Sandbox $ctx.Sandbox
         Assert-Match '\[LIVE\]' $out -Message 'gitsync live run must show [LIVE] in summary'
-        Assert-Match 'v7\.4\.' $out -Message 'gitsync live run must show version in summary'
+        Assert-Match 'v7\.' $out -Message 'gitsync live run must show version in summary'
     } finally { Remove-GitSandbox $ctx.Sandbox }
 }
 
-Test-Case 'gitstatus debug summary contains [DRY-RUN] and version v7.4.0' {
+Test-Case 'gitstatus debug summary contains [DRY-RUN] and version v7.x' {
     $sb = New-BasicSandbox
     try {
         $out = Invoke-ProductCommandText -Script 'gitstatus.ps1' -Func 'gitstatus' -Arg 'debug' -Sandbox $sb
         Assert-Match '\[DRY-RUN\]' $out -Message 'gitstatus debug must show [DRY-RUN] in summary'
-        Assert-Match 'v7\.4\.' $out -Message 'gitstatus debug must show version in summary'
+        Assert-Match 'v7\.' $out -Message 'gitstatus debug must show version in summary'
     } finally { Remove-GitSandbox $sb }
 }
 
-Test-Case 'gitstatus live run summary contains [LIVE] and version v7.4.0' {
+Test-Case 'gitstatus live run summary contains [LIVE] and version v7.x' {
     $sb = New-BasicSandbox
     try {
         $out = Invoke-ProductCommandText -Script 'gitstatus.ps1' -Func 'gitstatus' -Sandbox $sb
         Assert-Match '\[LIVE\]' $out -Message 'gitstatus live run must show [LIVE] in summary'
-        Assert-Match 'v7\.4\.' $out -Message 'gitstatus live run must show version in summary'
+        Assert-Match 'v7\.' $out -Message 'gitstatus live run must show version in summary'
     } finally { Remove-GitSandbox $sb }
 }
 

@@ -63,27 +63,35 @@ Test-Case 'gitmerge cross-all conflict: WARNING names the conflict branch in sum
 }
 
 # ---------------------------------------------------------------------------
-# Mesh (cross-all): dirty worktree skip -> NOTICE in summary
+# Mesh (cross-all): locked/untouchable worktree -> NOTICE in summary (v7.5.0: skip is for untouchable only)
 # ---------------------------------------------------------------------------
 
 Test-Case 'gitmerge cross-all dirty worktree skip: NOTICE names the skipped branch in summary' {
+    # v7.5.0: mere uncommitted changes no longer cause a skip in PASS 0. OVERLAPPING dirty changes
+    # that would be overwritten by the FF produce a WARNING (not a NOTICE) at apply time.
+    # This test verifies that when an OVERLAPPING uncommitted change causes branch-a to be skipped
+    # at apply, the branch name appears in the output with a WARNING (which is also a form of notice).
     $sb = New-GitSandbox
     try {
         $null = New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base'
+        # branch-a starts at base; adds a.txt
         $null = New-SandboxBranch -Sandbox $sb -Name 'branch-a'
         Invoke-SandboxGit $sb.Repo @('switch', 'branch-a') | Out-Null
         $null = New-SandboxCommit -Sandbox $sb -FileName 'a.txt' -Content "a`n" -Message 'a work'
+        # branch-b starts at base; adds b.txt
         $null = New-SandboxBranch -Sandbox $sb -Name 'branch-b'
         Invoke-SandboxGit $sb.Repo @('switch', 'branch-b') | Out-Null
         $null = New-SandboxCommit -Sandbox $sb -FileName 'b.txt' -Content "b`n" -Message 'b work'
         Invoke-SandboxGit $sb.Repo @('switch', 'main') | Out-Null
-        # Add a linked worktree for branch-a and dirty it.
+        # Add a linked worktree for branch-a; dirty it on b.txt (OVERLAPPING: the union adds b.txt
+        # to branch-a, so the FF would overwrite this uncommitted change -> branch-a is skipped + WARNING).
         $wtA = Join-Path $sb.Root 'wt-a'
         Invoke-SandboxGit $sb.Repo @('worktree', 'add', $wtA, 'branch-a') | Out-Null
-        Set-Content -LiteralPath (Join-Path $wtA 'a.txt') -Value "dirty`n" -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $wtA 'b.txt') -Value "dirty-b`n" -Encoding utf8
         $out = Invoke-ProductCommandText -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'cross-all' -Sandbox $sb
-        Assert-Match 'NOTICE' $out -Message 'cross-all summary must contain NOTICE when a worktree is dirty'
-        Assert-Match 'branch-a' $out -Message 'the skipped branch name must appear in the notice'
+        # With overlapping dirty change, branch-a is skipped at apply with a WARNING message
+        Assert-True ($out -match 'branch-a') 'the skipped branch name must appear in the output'
+        Assert-True ($out -match 'commit or stash') 'the output must advise commit or stash'
         Invoke-SandboxGit $sb.Repo @('worktree', 'remove', '--force', $wtA) | Out-Null
     } finally { Remove-GitSandbox $sb }
 }

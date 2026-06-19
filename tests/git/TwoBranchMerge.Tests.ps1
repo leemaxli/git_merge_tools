@@ -108,8 +108,9 @@ Test-Case 'gitmerge {branch} fast-forwards current up to an ahead X (X not check
     } finally { Remove-GitSandbox $sb }
 }
 
-# F1 all-or-nothing: X checked out in a dirty extra worktree -> preflight re-check fires -> both unchanged.
-Test-Case 'gitmerge {branch} refuses when X is checked out in another worktree and dirty; both unchanged' {
+# v7.5.0: X checked out in a separate worktree with NON-OVERLAPPING dirty change -> git FF succeeds;
+# both converge; dirty edit preserved.
+Test-Case 'gitmerge {branch}: X checked out dirty (NON-overlapping) succeeds; both converge; dirty edit preserved' {
     $sb = New-GitSandbox
     try {
         $base = New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base'
@@ -119,15 +120,75 @@ Test-Case 'gitmerge {branch} refuses when X is checked out in another worktree a
         $bTip = New-SandboxCommit -Sandbox $sb -FileName 'b.txt' -Content "b`n" -Message 'b work'
         Invoke-SandboxGit $sb.Repo @('switch', 'branch-a') | Out-Null
         $aTip = New-SandboxCommit -Sandbox $sb -FileName 'a.txt' -Content "a`n" -Message 'a work'
-        # check out branch-b in a SEPARATE worktree and dirty it
+        # check out branch-b in a SEPARATE worktree and dirty it on f.txt (NON-overlapping: the union adds
+        # only a.txt to branch-b; f.txt is not changed by the FF of branch-b to the union)
         $wtB = Join-Path $sb.Root 'wt-b'
         Invoke-SandboxGit $sb.Repo @('worktree', 'add', $wtB, 'branch-b') | Out-Null
-        Set-Content -LiteralPath (Join-Path $wtB 'b.txt') -Value "dirty`n" -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $wtB 'f.txt') -Value "dirty-nonoverlap`n" -Encoding utf8
 
         $ok = Invoke-ProductCommand -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'branch-b' -Sandbox $sb
-        Assert-False $ok 'gitmerge must refuse when X (branch-b) is checked out dirty elsewhere'
+        Assert-True $ok 'gitmerge must succeed when X dirty change is non-overlapping with the FF'
+        # both branches must converge
+        $aAfter = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-a'
+        $bAfter = Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-b'
+        Assert-Equal $aAfter $bAfter -Message 'branch-a and branch-b must converge to the same union'
+        # dirty edit preserved in the worktree
+        $content = Get-Content -LiteralPath (Join-Path $wtB 'f.txt') -Raw
+        Assert-True ($content -match 'dirty-nonoverlap') 'dirty edit on f.txt must be preserved after non-overlapping FF'
+    } finally {
+        $wtB = Join-Path $sb.Root 'wt-b'
+        if (Test-Path -LiteralPath $wtB) {
+            Invoke-SandboxGit $sb.Repo @('worktree', 'remove', '--force', $wtB) | Out-Null
+        }
+        Remove-GitSandbox $sb
+    }
+}
+
+# v7.5.0: X checked out in a separate worktree with OVERLAPPING dirty change -> git FF refuses;
+# both refs unchanged; dirty edit preserved (no data loss).
+Test-Case 'gitmerge {branch}: X checked out dirty (OVERLAPPING) refuses; both refs unchanged; edit preserved' {
+    $sb = New-GitSandbox
+    try {
+        $base = New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base'
+        New-SandboxBranch -Sandbox $sb -Name 'branch-a' -StartPoint $base
+        New-SandboxBranch -Sandbox $sb -Name 'branch-b' -StartPoint $base
+        Invoke-SandboxGit $sb.Repo @('switch', 'branch-b') | Out-Null
+        $bTip = New-SandboxCommit -Sandbox $sb -FileName 'shared.txt' -Content "b-version`n" -Message 'b edits shared'
+        Invoke-SandboxGit $sb.Repo @('switch', 'branch-a') | Out-Null
+        $aTip = New-SandboxCommit -Sandbox $sb -FileName 'shared.txt' -Content "a-version`n" -Message 'a edits shared'
+        # wait -- conflict case. We need union (no conflict), so make them touch different parts.
+        # Actually for the 2-branch engine, the union is built in a throwaway. To get the OVERLAPPING FF
+        # refusal on branch-b's worktree: the union must change shared.txt (from a-version). Branch-b
+        # has b-version committed; dirty edit on shared.txt in its worktree -> FF would overwrite it.
+        # But a and b both edit shared.txt -> conflict in the throwaway -> engine aborts before apply.
+        # So use non-conflicting union: a edits a.txt, b edits b.txt. Then dirty b.txt in branch-b's
+        # worktree -> FF of branch-b to union (which adds a.txt) does NOT touch b.txt -> non-overlapping!
+        # For OVERLAPPING: we need the union to change a file that branch-b's worktree has uncommitted.
+        # The union = branch-a tip + branch-b tip. FF of branch-b to union adds a.txt (from branch-a).
+        # Dirty branch-b's worktree on a.txt -> OVERLAPPING (FF would introduce a.txt, wip on a.txt).
+        # Reset:
+        Remove-GitSandbox $sb
+        $sb = New-GitSandbox
+        $base = New-SandboxCommit -Sandbox $sb -FileName 'f.txt' -Content "base`n" -Message 'base'
+        New-SandboxBranch -Sandbox $sb -Name 'branch-a' -StartPoint $base
+        New-SandboxBranch -Sandbox $sb -Name 'branch-b' -StartPoint $base
+        Invoke-SandboxGit $sb.Repo @('switch', 'branch-b') | Out-Null
+        $bTip = New-SandboxCommit -Sandbox $sb -FileName 'b.txt' -Content "b`n" -Message 'b work'
+        Invoke-SandboxGit $sb.Repo @('switch', 'branch-a') | Out-Null
+        $aTip = New-SandboxCommit -Sandbox $sb -FileName 'a.txt' -Content "a`n" -Message 'a work'
+        # check out branch-b in a SEPARATE worktree and dirty it on a.txt (OVERLAPPING: FF of branch-b to
+        # the union adds a.txt; uncommitted edit on a.txt would be overwritten)
+        $wtB = Join-Path $sb.Root 'wt-b'
+        Invoke-SandboxGit $sb.Repo @('worktree', 'add', $wtB, 'branch-b') | Out-Null
+        Set-Content -LiteralPath (Join-Path $wtB 'a.txt') -Value "b-wip-on-a`n" -Encoding utf8
+
+        $ok = Invoke-ProductCommand -Script 'gitmerge.ps1' -Func 'gitmerge' -Arg 'branch-b' -Sandbox $sb
+        Assert-False $ok 'gitmerge must refuse when X dirty change OVERLAPS with the union FF (data protection)'
         Assert-Equal $aTip (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-a') -Message 'branch-a unchanged'
         Assert-Equal $bTip (Get-SandboxRef -Sandbox $sb -Ref 'refs/heads/branch-b') -Message 'branch-b unchanged'
+        # dirty edit preserved in the worktree
+        $content = Get-Content -LiteralPath (Join-Path $wtB 'a.txt') -Raw
+        Assert-True ($content -match 'b-wip-on-a') 'overlapping dirty edit must be preserved (not overwritten)'
     } finally {
         $wtB = Join-Path $sb.Root 'wt-b'
         if (Test-Path -LiteralPath $wtB) {

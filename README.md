@@ -2,7 +2,7 @@
 
 :cn: **简体中文** · [:us: English](README.en.md)
 
-![version](https://img.shields.io/badge/version-v7.4.1-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+![version](https://img.shields.io/badge/version-v7.5.0-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **安全、事务式的 Git 分支整合工具** — 三条跨平台 PowerShell 命令,带按终端能力自动降级的视觉层。
 
@@ -183,11 +183,12 @@ gitstatus all
 
 ## 版本历史
 
-> 当前版本: **v7.4.1**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
+> 当前版本: **v7.5.0**。早期 v1–v3 在引入 Git 之前,为概述性追溯;v4 起依 Git 提交历史编写。
 >
 > **历史精简规则:** 当前大版本列出所有子版本;往前每个大版本保留 3–6 个里程碑子版本(越旧越少);超过 5 个大版本之前的旧版本仅保留一行大版本摘要。
 
 **v7.x — 拓扑重定义:star / mesh,去 main 中心(当前)**
+- **v7.5.0** — 修复:未提交的改动**不再预先阻断**合并操作。引擎只拒绝真正不可触碰的状态(worktree 锁定 / 不可用 / 合并-变基-cherry-pick-revert 进行中);普通脏 worktree 由 `git merge --ff-only` 在 apply 时仲裁——非重叠改动快进成功(改动保留),重叠改动快进被拒绝(无任何损失)。不需要移动的分支(已在并集顶端)永不被碰触。新增 `Test-WorktreeUsable` 辅助函数。
 - **v7.4.1** — 修复:`gitmerge cross-all` 在**当前分支工作树脏**时改为明确中止(提示先 commit/stash),不再静默跳过当前分支、把其余分支"收敛"成一个什么都没合并的假成功——当前分支是 cross-all 的核心,与 star 的 hub、2-branch 的当前分支处理一致。
 - **v7.4** — UX 与质量:运行 Banner 显示版本、仓库 URL 和作者,对齐方框格式;三条命令统一 Summary 标题(版本 + `[LIVE]`/`[DRY-RUN]`);Summary 新增调用参数展示、紧凑工作流链、整合的 Notices/Warnings 块;近期 log 增加提交链图和按档位着色/emoji;移除已死的 through-main 引擎并抽出共享 helper。
 - **v7.3** — `gitsync` 全面采用新拓扑 + **逐分支远端同步**:每种参数(2-branch / all / cross-all)= 对应的 `gitmerge` 拓扑,外加合并前安全拉取每个涉及的 `origin/<分支>`、合并后**逐分支推送**其各自的 `origin/<分支>`(单 ref 普通推送,被拒即跳过、绝不 force);取代"经 main + 一次 atomic 推送"的旧模型。不安全的 main 或星形 hub 则中止。
