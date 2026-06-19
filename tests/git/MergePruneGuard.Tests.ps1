@@ -13,7 +13,8 @@ Test-Case 'gitmerge does not prune a local-only tag even with fetch.pruneTags=tr
         Invoke-SandboxGit $sb.Repo @('config', 'fetch.pruneTags', 'true') | Out-Null
         Invoke-SandboxGit $sb.Repo @('tag', 'local-only-tag', $base) | Out-Null
 
-        # a feature branch to consolidate, so gitmerge runs Sync-MainFromOrigin (fetch origin) before merging
+        # a feature branch to consolidate; gitmerge is LOCAL-ONLY (no fetch) so the local-only tag
+        # survives even though fetch.pruneTags=true is set -- the assertion below guards that invariant
         New-SandboxBranch -Sandbox $sb -Name 'feature/x'
         Invoke-SandboxGit $sb.Repo @('switch', 'feature/x') | Out-Null
         $null = New-SandboxCommit -Sandbox $sb -FileName 'g.txt' -Content "feature`n" -Message 'feature work'

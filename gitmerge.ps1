@@ -275,8 +275,11 @@ function gitmerge {
                 Where-Object { $_ -is [bool] } | Select-Object -Last 1
         }
         else {
-            @(Invoke-GitMergeConsolidation -BranchName $BranchName -RunState $runState -Visual $visual) |
-                Where-Object { $_ -is [bool] } | Select-Object -Last 1
+            # Defensive backstop: Get-Mode returns only 'current'/'single'/'all'/'cross-all'/'debug',
+            # so this branch is unreachable in normal operation.
+            $runState.FailureReason = "Unknown mode '$mode'."
+            Write-Warning $runState.FailureReason
+            $false
         }
         return [bool]$engineResult
     }

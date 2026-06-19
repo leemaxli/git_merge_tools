@@ -2,9 +2,11 @@
 
 # Feature #10: a selected target with an unmerged descendant ("sub-branch") not itself selected is
 # SKIPPED (not consolidated) with a clear warning -- so its children's work is not silently left behind.
-# SCOPE: #10 skip applies to `all`/`cross-all` (Invoke-GitMergeConsolidation) and to gitsync.
-# For `gitmerge {branch}` (2-branch path, Invoke-TwoBranchMerge), #10 is retired in v7.0:
-# advancing X to the union is a pure fast-forward that leaves all descendant commits intact.
+# SCOPE: the #10 sub-branch-skip concept is retired across the v7 topology engines. Test 1 below
+# verifies the 2-branch engine (Invoke-TwoBranchMerge) integrates a target that has a descendant,
+# because a pure fast-forward leaves all descendant commits intact. Test 2 verifies the star engine
+# (Invoke-StarMerge / `all` mode) integrates a descendant when it is itself a selected target --
+# i.e. no skip occurs when the whole tree is in scope. Invoke-GitMergeConsolidation is removed.
 Test-Case 'gitmerge {branch} converges even when the target has an unmerged descendant (v7.0: #10 skip retired for 2-branch)' {
     $sb = New-GitSandbox
     try {

@@ -127,9 +127,11 @@ is additive for non-main targets.
 ## Done
 
 - **P3 structural refactor (on main):** `GitMergeTools.Core.psm1` (single source of truth for git
-  primitives) + `GitMergeTools.Merge.psm1` (the `Invoke-GitMergeConsolidation` transactional engine); all
-  three commands are thin peers on one engine — **the `gitsync → gitmerge` call is gone**. A characterization
-  net (`EngineTransaction.Tests.ps1`) locks the engine's safety invariants across the extraction.
+  primitives) + `GitMergeTools.Merge.psm1` (three topology engines: `Invoke-TwoBranchMerge`,
+  `Invoke-StarMerge`, `Invoke-MeshMerge`); all three commands are thin peers routing directly to the
+  appropriate engine — **the `gitsync → gitmerge` call is gone**, and the legacy
+  `Invoke-GitMergeConsolidation` engine has been removed (v7 cleanup). A characterization net
+  (`EngineTransaction.Tests.ps1`) locks the engine's safety invariants across the extraction.
 - **Architecture slimming (on main):** folded the `max` tier into `rich` and deleted it — `max` stays a
   compatibility alias for `rich` (v5.4.0); moved all `GitMergeTools.*.psm1` modules into a `Modules/`
   subfolder with the entry commands staying top-level (loaders prefer `Modules/`, flat layout still
