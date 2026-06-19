@@ -191,7 +191,7 @@ function gitstatus {
             }
         }
 
-        $log = Invoke-GitCommand $Repository @('log', '--oneline', '--decorate', '-10', $Branch) -SuppressError
+        $logLines = Get-RecentCommitLines -Repository $Repository -Branch $Branch -Decorate
         $mainCompare = if ($Branch -ceq $MainBranch) {
             [pscustomobject]@{ LeftOnly = 0; RightOnly = 0 }
         }
@@ -207,7 +207,7 @@ function gitstatus {
             StatusAvailable = $statusAvailable
             DirtyCount      = $dirtyCount
             StatusLines     = [string[]]$statusLines
-            LogLines        = [string[]]@($log.Output)
+            LogLines        = [string[]]@($logLines)
             MainBehind      = if ($null -eq $mainCompare) { $null } else { $mainCompare.LeftOnly }
             MainAhead       = if ($null -eq $mainCompare) { $null } else { $mainCompare.RightOnly }
             OriginBehind    = if ($null -eq $originCompare) { $null } else { $originCompare.LeftOnly }

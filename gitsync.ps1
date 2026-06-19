@@ -207,11 +207,11 @@ function gitsync {
             Write-Host ("  Failure reason  : {0}" -f $FailureReason) -ForegroundColor Red
         }
         if ($Mode -ne 'debug' -and -not [string]::IsNullOrWhiteSpace($Repository) -and -not [string]::IsNullOrWhiteSpace($MainBranch)) {
-            $recent = Invoke-GitCommand $Repository @('log', '--oneline', '-10', $MainBranch) -SuppressError
-            if ($recent.ExitCode -eq 0 -and @($recent.Output).Count -gt 0) {
+            $recent = Get-RecentCommitLines -Repository $Repository -Branch $MainBranch
+            if (@($recent).Count -gt 0) {
                 Write-Host ''
                 Write-Host "── Recent commits on $MainBranch ──" -ForegroundColor DarkGray
-                foreach ($line in @($recent.Output)) {
+                foreach ($line in @($recent)) {
                     Write-Host "   $line" -ForegroundColor DarkGray
                 }
             }

@@ -396,24 +396,19 @@ function Invoke-TwoBranchMerge {
     }
 
     # Step 8: Create throwaway worktree at current's tip.
-    $suffix = $null
-    do {
-        $suffix = [guid]::NewGuid().ToString('N')
-        $temporaryBranch = "gitmerge-tmp-$suffix"
-    } while (Test-LocalBranch $repository $temporaryBranch)
-    $temporaryWorktree = Join-Path ([System.IO.Path]::GetTempPath()) $temporaryBranch
+    $temporaryWorktree = $null
+    $temporaryBranch = $null
 
     try {
         Write-Stage -Title 'TEMPORARY MERGE' -Subtitle "Build and validate the union of '$current' and '$X' before touching real refs" -StageIcon 'MERGE'
-        Write-StatusLine -Marker '->' -Message "Creating temporary branch '$temporaryBranch' at '$current'." -Color Cyan
-        $create = Invoke-GitCommand $repository @(
-            'worktree', 'add', '-b', $temporaryBranch, $temporaryWorktree, "refs/heads/$current"
-        ) -MergeError
-        if ($create.ExitCode -ne 0) {
-            Write-GitFailure 'Cannot create the temporary merge worktree' $create
+        $tmpWt = New-TemporaryWorktree -Repository $repository -BaseRef "refs/heads/$current"
+        if ($null -eq $tmpWt) {
             $RunState.FailureReason = 'Cannot create the temporary merge worktree.'
             return $false
         }
+        $temporaryWorktree = $tmpWt.WorktreePath
+        $temporaryBranch = $tmpWt.TemporaryBranch
+        Write-StatusLine -Marker '->' -Message "Creating temporary branch '$temporaryBranch' at '$current'." -Color Cyan
         Write-StatusLine -Marker 'i' -Message "Temporary worktree: $temporaryWorktree" -Color Green
 
         # Step 9: Merge X into the throwaway to build the union.
@@ -733,24 +728,16 @@ function Invoke-StarMerge {
     }
 
     # Step 6: PASS 2a -- build hub accumulator in a throwaway.
-    $suffix = $null
-    do {
-        $suffix = [guid]::NewGuid().ToString('N')
-        $temporaryBranch = "gitmerge-tmp-$suffix"
-    } while (Test-LocalBranch $repository $temporaryBranch)
-    $temporaryWorktree = Join-Path ([System.IO.Path]::GetTempPath()) $temporaryBranch
-
     try {
         Write-Stage -Title 'BUILD HUB UNION' -Subtitle "Merge spokes into throwaway at hub '$T' (real refs untouched)" -StageIcon 'MERGE'
-        Write-StatusLine -Marker '->' -Message "Creating temporary branch '$temporaryBranch' at '$T'." -Color Cyan
-        $create = Invoke-GitCommand $repository @(
-            'worktree', 'add', '-b', $temporaryBranch, $temporaryWorktree, "refs/heads/$T"
-        ) -MergeError
-        if ($create.ExitCode -ne 0) {
-            Write-GitFailure 'Cannot create the temporary merge worktree' $create
+        $tmpWt = New-TemporaryWorktree -Repository $repository -BaseRef "refs/heads/$T"
+        if ($null -eq $tmpWt) {
             $RunState.FailureReason = 'Cannot create the temporary merge worktree.'
             return $false
         }
+        $temporaryWorktree = $tmpWt.WorktreePath
+        $temporaryBranch = $tmpWt.TemporaryBranch
+        Write-StatusLine -Marker '->' -Message "Creating temporary branch '$temporaryBranch' at '$T'." -Color Cyan
         Write-StatusLine -Marker 'i' -Message "Temporary worktree: $temporaryWorktree" -Color Green
 
         $hubMergedB = [System.Collections.Generic.List[object]]::new()
@@ -1135,24 +1122,17 @@ function Invoke-MeshMerge {
     $temporaryBranch = $null
     $temporaryWorktree = $null
 
-    do {
-        $suffix = [guid]::NewGuid().ToString('N')
-        $temporaryBranch = "gitmerge-tmp-$suffix"
-    } while (Test-LocalBranch $repository $temporaryBranch)
-    $temporaryWorktree = Join-Path ([System.IO.Path]::GetTempPath()) $temporaryBranch
-
     try {
         # Step 5: PASS 1 -- validate the union in a throwaway (real refs untouched).
         Write-Stage -Title 'BUILD UNION' -Subtitle "Merge all safe branches into throwaway at '$base' (real refs untouched)" -StageIcon 'MERGE'
-        Write-StatusLine -Marker '->' -Message "Creating temporary branch '$temporaryBranch' at '$base'." -Color Cyan
-        $create = Invoke-GitCommand $repository @(
-            'worktree', 'add', '-b', $temporaryBranch, $temporaryWorktree, "refs/heads/$base"
-        ) -MergeError
-        if ($create.ExitCode -ne 0) {
-            Write-GitFailure 'Cannot create the temporary merge worktree' $create
+        $tmpWt = New-TemporaryWorktree -Repository $repository -BaseRef "refs/heads/$base"
+        if ($null -eq $tmpWt) {
             $RunState.FailureReason = 'Cannot create the temporary merge worktree.'
             return $false
         }
+        $temporaryWorktree = $tmpWt.WorktreePath
+        $temporaryBranch = $tmpWt.TemporaryBranch
+        Write-StatusLine -Marker '->' -Message "Creating temporary branch '$temporaryBranch' at '$base'." -Color Cyan
         Write-StatusLine -Marker 'i' -Message "Temporary worktree: $temporaryWorktree" -Color Green
 
         # Merge every safe branch (except base) into the throwaway accumulator. CONFLICT -> fail-fast.
@@ -1295,6 +1275,33 @@ function Invoke-MeshMerge {
     }
 }
 
+function New-TemporaryWorktree {
+    # Creates a throwaway git worktree for transactional merge operations.
+    # Loops until a unique 'gitmerge-tmp-<guid>' branch name is found, computes
+    # the worktree path under [System.IO.Path]::GetTempPath(), runs
+    # 'git worktree add -b <branch> <path> <BaseRef>', and on failure calls
+    # Write-GitFailure and returns $null. On success returns a pscustomobject
+    # with WorktreePath and TemporaryBranch.
+    param(
+        [Parameter(Mandatory)][string]$Repository,
+        [Parameter(Mandatory)][string]$BaseRef
+    )
+    $temporaryBranch = $null
+    do {
+        $suffix = [guid]::NewGuid().ToString('N')
+        $temporaryBranch = "gitmerge-tmp-$suffix"
+    } while (Test-LocalBranch $Repository $temporaryBranch)
+    $temporaryWorktree = Join-Path ([System.IO.Path]::GetTempPath()) $temporaryBranch
+    $create = Invoke-GitCommand $Repository @(
+        'worktree', 'add', '-b', $temporaryBranch, $temporaryWorktree, $BaseRef
+    ) -MergeError
+    if ($create.ExitCode -ne 0) {
+        Write-GitFailure 'Cannot create the temporary merge worktree' $create
+        return $null
+    }
+    return [pscustomobject]@{ WorktreePath = $temporaryWorktree; TemporaryBranch = $temporaryBranch }
+}
+
 Export-ModuleMember -Function @(
     'Get-WorktreeInProgressOperation',
     'Get-RemoteBranchSyncState',
@@ -1305,5 +1312,6 @@ Export-ModuleMember -Function @(
     'Invoke-TemporaryCleanup',
     'Invoke-TwoBranchMerge',
     'Invoke-StarMerge',
-    'Invoke-MeshMerge'
+    'Invoke-MeshMerge',
+    'New-TemporaryWorktree'
 )

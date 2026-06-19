@@ -263,6 +263,30 @@ function Get-UniqueBranchList {
     return $result.ToArray()
 }
 
+function Get-RecentCommitLines {
+    # Returns the recent one-line log entries for a branch as a string array.
+    # Runs 'git log --oneline [-10] [-decorate] <branch>' via Invoke-GitCommand -SuppressError.
+    # Returns @($result.Output) on success with output, else @().
+    # Callers own all rendering; this helper only fetches.
+    param(
+        [Parameter(Mandatory)][string]$Repository,
+        [Parameter(Mandatory)][string]$Branch,
+        [int]$Count = 10,
+        [switch]$Decorate
+    )
+    $args = [System.Collections.Generic.List[string]]::new()
+    $args.Add('log')
+    $args.Add('--oneline')
+    if ($Decorate) { $args.Add('--decorate') }
+    $args.Add("-$Count")
+    $args.Add($Branch)
+    $result = Invoke-GitCommand $Repository $args.ToArray() -SuppressError
+    if ($result.ExitCode -eq 0 -and @($result.Output).Count -gt 0) {
+        return @($result.Output)
+    }
+    return @()
+}
+
 Export-ModuleMember -Function @(
     'Invoke-GitCommand',
     'Get-FirstOutputLine',
@@ -276,5 +300,6 @@ Export-ModuleMember -Function @(
     'Get-RefHash',
     'Test-Ancestor',
     'Get-Mode',
-    'Get-UniqueBranchList'
+    'Get-UniqueBranchList',
+    'Get-RecentCommitLines'
 )
